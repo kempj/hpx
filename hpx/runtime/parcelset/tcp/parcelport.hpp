@@ -88,8 +88,8 @@ namespace hpx { namespace parcelset { namespace tcp
         /// operation or on any error.
         ///
         /// \param parcels  [in] A reference to the list of parcels to send.
-        /// \param handlers [in] A list of function objects to be invoked on 
-        ///                 successful completion or on errors. The signature of 
+        /// \param handlers [in] A list of function objects to be invoked on
+        ///                 successful completion or on errors. The signature of
         ///                 these function objects is expected to be:
         ///
         /// \code
@@ -126,6 +126,19 @@ namespace hpx { namespace parcelset { namespace tcp
         boost::int64_t get_connection_cache_statistics(
             connection_cache_statistics_type t, bool reset);
 
+        /// support enable_shared_from_this
+        boost::shared_ptr<parcelport> shared_from_this()
+        {
+            return boost::static_pointer_cast<parcelport>(
+                parcelset::parcelport::shared_from_this());
+        }
+
+        boost::shared_ptr<parcelport const> shared_from_this() const
+        {
+            return boost::static_pointer_cast<parcelport const>(
+                parcelset::parcelport::shared_from_this());
+        }
+
     protected:
         // helper functions for receiving parcels
         void handle_accept(boost::system::error_code const& e,
@@ -144,6 +157,17 @@ namespace hpx { namespace parcelset { namespace tcp
         /// \brief Retrieve a new connection
         parcelport_connection_ptr get_connection(naming::locality const& l,
             error_code& ec = throws);
+        parcelport_connection_ptr get_connection_wait(naming::locality const& l,
+            error_code& ec = throws);
+
+        parcelport_connection_ptr create_connection(naming::locality const& l,
+            error_code& ec = throws);
+
+        void send_parcels_or_reclaim_connection(naming::locality const& locality_id,
+            parcelport_connection_ptr const& client_connection);
+        void retry_sending_parcels(naming::locality const& locality_id);
+        void get_connection_and_send_parcels(naming::locality const& locality_id, 
+            naming::gid_type const& parcel_id);
 
     private:
         /// The pool of io_service objects used to perform asynchronous operations.
@@ -156,8 +180,15 @@ namespace hpx { namespace parcelset { namespace tcp
         util::connection_cache<parcelport_connection, naming::locality> connection_cache_;
 
         /// The list of accepted connections
+        mutable lcos::local::spinlock connections_mtx_;
+
         typedef std::set<server::tcp::parcelport_connection_ptr> accepted_connections_set;
         accepted_connections_set accepted_connections_;
+
+#if defined(HPX_HOLDON_TO_OUTGOING_CONNECTIONS)
+        typedef std::set<tcp::parcelport_connection_weak_ptr> write_connections_set;
+        write_connections_set write_connections_;
+#endif
     };
 }}}
 

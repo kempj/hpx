@@ -105,7 +105,7 @@ namespace hpx { namespace threads { namespace policies
 
         bool numa_sensitive() const { return numa_sensitive_; }
 
-        std::size_t get_pu_mask(topology const& topology, std::size_t num_thread) const
+        threads::mask_cref_type get_pu_mask(topology const& topology, std::size_t num_thread) const
         {
             return affinity_data_.get_pu_mask(topology, num_thread, numa_sensitive_);
         }
@@ -115,9 +115,17 @@ namespace hpx { namespace threads { namespace policies
             return affinity_data_.get_pu_num(num_thread);
         }
 
-        std::size_t get_num_stolen_threads(bool reset)
+        std::size_t get_num_stolen_threads(std::size_t num_thread, bool reset)
         {
-            return util::get_and_reset_value(stolen_threads_, reset);
+            std::size_t num_stolen_threads = 0;
+            if (num_thread == std::size_t(-1)) 
+            {
+                for (std::size_t i = 0; i < queues_.size(); ++i)
+                    num_stolen_threads += queues_[i]->get_num_stolen_threads(reset);
+                return num_stolen_threads;
+            }
+
+            return queues_[num_thread]->get_num_stolen_threads(reset);
         }
 
         ///////////////////////////////////////////////////////////////////////
@@ -255,7 +263,7 @@ namespace hpx { namespace threads { namespace policies
                 std::size_t idx = (i + num_thread) % queues_.size();
                 if (queues_[idx]->get_next_thread(thrd, num_thread))
                 {
-                    ++stolen_threads_;
+                    queues_[idx]->increment_num_stolen_threads();
                     return true;
                 }
             }
@@ -306,28 +314,24 @@ namespace hpx { namespace threads { namespace policies
 
             if (0 == added) {
                 // steal work items: first try to steal from other cores in the
-                // same numa node
-                mask_type core_mask = topology_.get_thread_affinity_mask(
+                // same NUMA node
+                mask_cref_type core_mask = topology_.get_thread_affinity_mask(
                     num_thread, numa_sensitive_);
-                mask_type node_mask = topology_.get_numa_node_affinity_mask(
+                mask_cref_type node_mask = topology_.get_numa_node_affinity_mask(
                     num_thread, numa_sensitive_);
 
-                if (core_mask && node_mask) {
-                    mask_type m = 0x01LL;
+                if (any(core_mask) && any(node_mask)) {
                     for (std::size_t i = 0; (0 == added) && i < queues_.size();
-                         m <<= 1, ++i)
+                         ++i)
                     {
-                        if (m == core_mask || !(m & node_mask))
+                        if (i == num_thread || !test(node_mask, i))
                             continue;         // don't steal from ourselves
 
-                        std::size_t idx = least_significant_bit_set(m);
-                        BOOST_ASSERT(idx < queues_.size());
-
-                        result = queues_[num_thread]->wait_or_add_new(idx,
-                            running, idle_loop_count, added, queues_[idx]) && result;
+                        result = queues_[num_thread]->wait_or_add_new(i,
+                            running, idle_loop_count, added, queues_[i]) && result;
                         if (0 != added)
                         {
-                            stolen_threads_ += added;
+                            queues_[num_thread]->increment_num_stolen_threads(added);
                             return result;
                         }
                     }
@@ -340,7 +344,7 @@ namespace hpx { namespace threads { namespace policies
                         idle_loop_count, added, queues_[idx]) && result;
                     if (0 != added)
                     {
-                        stolen_threads_ += added;
+                        queues_[num_thread]->increment_num_stolen_threads(added);
                         return result;
                     }
                 }
@@ -408,7 +412,6 @@ namespace hpx { namespace threads { namespace policies
         detail::affinity_data affinity_data_;
         bool numa_sensitive_;
         topology const& topology_;
-        boost::atomic<std::size_t> stolen_threads_;
     };
 }}}
 

@@ -23,6 +23,7 @@
 #include <hpx/hpx_fwd.hpp>
 #include <hpx/exception.hpp>
 #include <hpx/util/logging.hpp>
+#include <hpx/util/get_and_reset_value.hpp>
 
 #include <boost/assert.hpp>
 #include <boost/shared_ptr.hpp>
@@ -64,6 +65,7 @@ namespace hpx { namespace util
           , evictions_(0)
           , hits_(0)
           , misses_(0)
+          , reclaims_(0)
         {
             if (max_connections_per_locality_ > max_connections_)
             {
@@ -163,6 +165,9 @@ namespace hpx { namespace util
                     conn = boost::get<0>(it->second).front();
                     boost::get<0>(it->second).pop_front();
 
+#if defined(HPX_TRACK_STATE_OF_OUTGOING_TCP_CONNECTION)
+                    conn->set_state(Connection::state_reinitialized);
+#endif
                     ++hits_;
                     check_invariants();
                     return true;
@@ -214,10 +219,10 @@ namespace hpx { namespace util
 
             // See if we have enough space or can make space available.
 
-            // Note that we ignore the outcome of free_space() here as we have 
-            // to guarantee to have space for the new connection as there are 
-            // no connections outstanding for this locality. If free_space 
-            // fails we grow the cache size beyond its limit (hoping that it 
+            // Note that we ignore the outcome of free_space() here as we have
+            // to guarantee to have space for the new connection as there are
+            // no connections outstanding for this locality. If free_space
+            // fails we grow the cache size beyond its limit (hoping that it
             // will be reduced in size next time some connection is handed back
             // to the cache).
             free_space();
@@ -262,6 +267,11 @@ namespace hpx { namespace util
                 // Add the connection to the entry.
                 boost::get<0>(ct->second).push_back(conn);
 
+                ++reclaims_;
+
+#if defined(HPX_TRACK_STATE_OF_OUTGOING_TCP_CONNECTION)
+                conn->set_state(Connection::state_reclaimed);
+#endif
                 // FIXME: Again, this should probably throw instead of asserting,
                 // as invariants could be invalidated here due to caller error.
                 check_invariants();
@@ -312,13 +322,14 @@ namespace hpx { namespace util
             evictions_ = 0;
             hits_ = 0;
             misses_ = 0;
+            reclaims_ = 0;
 
             // FIXME: This should probably throw instead of asserting, as it
             // can be triggered by caller error.
             check_invariants();
         }
 
-        /// Destroys all connections for the give locality in the cache, reset
+        /// Destroys all connections for the given locality in the cache, reset
         /// all associated counts.
         ///
         /// \note Calling this function while connections are still checked out
@@ -371,6 +382,12 @@ namespace hpx { namespace util
         {
             mutex_type::scoped_lock lock(mtx_);
             return util::get_and_reset_value(misses_, reset);
+        }
+
+        boost::int64_t get_cache_reclaims(bool reset)
+        {
+            mutex_type::scoped_lock lock(mtx_);
+            return util::get_and_reset_value(reclaims_, reset);
         }
 
     private:
@@ -429,7 +446,7 @@ namespace hpx { namespace util
 
             while (connections_ >= max_connections_)
             {
-                // Find the least recent used keys data.
+                // Find the least recently used keys data.
                 const typename cache_type::iterator ct = cache_.find(*kt);
                 BOOST_ASSERT(ct != cache_.end());
 
@@ -484,6 +501,7 @@ namespace hpx { namespace util
         boost::int64_t evictions_;
         boost::int64_t hits_;
         boost::int64_t misses_;
+        boost::int64_t reclaims_;
     };
 }}
 

@@ -13,6 +13,7 @@
 #include <hpx/config/manual_profiling.hpp>
 #include <hpx/config/forceinline.hpp>
 #include <hpx/config/noexcept.hpp>
+#include <hpx/config/constexpr.hpp>
 #include <hpx/config/preprocessor/add3.hpp>
 #include <hpx/config/preprocessor/round_up.hpp>
 #include <hpx/config/preprocessor/round_up_add3.hpp>
@@ -22,7 +23,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Make sure DEBUG macro is defined consistently across platforms
 #if defined(_DEBUG) && !defined(DEBUG)
-#  define DEBUG
+#  define DEBUG 1
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -189,7 +190,7 @@
 /// (to each of the other localities on the same node). This value can be changed
 /// at runtime by setting the configuration parameter:
 ///
-///   hpx.parcel.shmem_data_buffer_cache_size = ...
+///   hpx.parcel.shmem.data_buffer_cache_size = ...
 ///
 /// (or by setting the corresponding environment variable
 /// HPX_PARCEL_SHMEM_DATA_BUFFER_CACHE_SIZE).
@@ -412,8 +413,21 @@
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
-#if !defined(HPX_PLUGIN_PREFIX)
-#  define HPX_PLUGIN_PREFIX HPX_MANGLE_NAME(HPX_COMPONENT_NAME)
+#if !defined(HPX_PLUGIN_NAME)
+#  define HPX_PLUGIN_NAME hpx
+#endif
+
+#if !defined(HPX_PLUGIN_STRING)
+#  define HPX_PLUGIN_STRING BOOST_PP_STRINGIZE(HPX_PLUGIN_NAME)
+#endif
+
+#if !defined(HPX_PLUGIN_PLUGIN_PREFIX)
+#  define HPX_PLUGIN_PLUGIN_PREFIX HPX_MANGLE_NAME(HPX_PLUGIN_NAME)
+#endif
+
+///////////////////////////////////////////////////////////////////////////////
+#if !defined(HPX_PLUGIN_COMPONENT_PREFIX)
+#  define HPX_PLUGIN_COMPONENT_PREFIX HPX_MANGLE_NAME(HPX_COMPONENT_NAME)
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -579,13 +593,24 @@
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
+// Make sure we have support for more than 64 threads for Xeon Phi
+#if defined(__MIC__) && !defined(HPX_HAVE_MORE_THAN_64_THREADS)
+#  define HPX_HAVE_MORE_THAN_64_THREADS
+#endif
+
+///////////////////////////////////////////////////////////////////////////////
 #define HPX_AGAS_BOOTSTRAP_PREFIX   0U
+
+#define HPX_AGAS_NS_MSB             0x0000000000000001ULL
+
 #define HPX_AGAS_PRIMARY_NS_MSB     0x0000000100000001ULL
 #define HPX_AGAS_PRIMARY_NS_LSB     0x0000000000000001ULL
 #define HPX_AGAS_COMPONENT_NS_MSB   0x0000000100000001ULL
 #define HPX_AGAS_COMPONENT_NS_LSB   0x0000000000000002ULL
 #define HPX_AGAS_SYMBOL_NS_MSB      0x0000000100000001ULL
 #define HPX_AGAS_SYMBOL_NS_LSB      0x0000000000000003ULL
+#define HPX_AGAS_LOCALITY_NS_MSB    0x0000000100000001ULL
+#define HPX_AGAS_LOCALITY_NS_LSB    0x0000000000000004ULL
 
 #if !defined(HPX_NO_DEPRECATED)
 #  define HPX_DEPRECATED_MSG "This function is deprecated and will be removed in the future."

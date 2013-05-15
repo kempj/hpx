@@ -425,6 +425,11 @@ namespace hpx { namespace performance_counters
         if (p.parentinstancename_.empty()) {
             p.parentinstancename_ = "locality";
             p.parentinstanceindex_ = static_cast<boost::int64_t>(get_locality_id());
+            if (p.instancename_.empty())
+            {
+                p.instancename_ = "total";
+                p.instanceindex_ = -1;
+            }
         }
 
         // fill with complete counter type info
@@ -618,14 +623,28 @@ namespace hpx { namespace performance_counters
         // \brief Create a new aggregating performance counter instance based
         //        on given base counter name and given base time interval
         //        (milliseconds).
-        naming::gid_type create_aggregating_counter(
+        naming::gid_type create_statistics_counter(
             counter_info const& info, std::string const& base_counter_name,
             std::vector<boost::int64_t> const& parameters, error_code& ec)
         {
             naming::gid_type gid;
             get_runtime().get_counter_registry().
-                create_aggregating_counter(info, base_counter_name,
+                create_statistics_counter(info, base_counter_name,
                     parameters, gid, ec);
+            return gid;
+        }
+
+        // \brief Create a new aggregating performance counter instance based
+        //        on given base counter name and given base time interval
+        //        (milliseconds).
+        naming::gid_type create_arithmetics_counter(
+            counter_info const& info, std::string const& base_counter_name1,
+            std::string const& base_counter_name2, error_code& ec)
+        {
+            naming::gid_type gid;
+            get_runtime().get_counter_registry().
+                create_arithmetics_counter(info, base_counter_name1,
+                    base_counter_name2, gid, ec);
             return gid;
         }
 
@@ -655,7 +674,8 @@ namespace hpx { namespace performance_counters
             if (ec) {
                 HPX_THROW_EXCEPTION(bad_parameter, "create_counter_local",
                     "no create function for performance counter found: " +
-                    info.fullname_ + " (" + ec.get_message() + ")");
+                    remove_counter_prefix(info.fullname_) + 
+                        " (" + ec.get_message() + ")");
                 return naming::invalid_gid;
             }
 
@@ -678,7 +698,8 @@ namespace hpx { namespace performance_counters
             if (ec) {
                 HPX_THROW_EXCEPTION(bad_parameter, "create_counter_local",
                     "couldn't create performance counter: " +
-                    info.fullname_ + " (" + ec.get_message() + ")");
+                    remove_counter_prefix(info.fullname_) + 
+                        " (" + ec.get_message() + ")");
                 return naming::invalid_gid;
             }
 
@@ -686,6 +707,43 @@ namespace hpx { namespace performance_counters
         }
 
         ///////////////////////////////////////////////////////////////////////
+        inline bool is_thread_kind(std::string const& pattern)
+        {
+            return pattern.find("-thread#*") == pattern.size() - 9;
+        }
+
+        inline std::string get_thread_kind(std::string const& pattern)
+        {
+            BOOST_ASSERT(is_thread_kind(pattern));
+            return pattern.substr(0, pattern.find_last_of('-'));
+        }
+
+        ///////////////////////////////////////////////////////////////////////
+        /// Expand all wild-cards in a counter base name (for aggregate counters)
+        bool expand_basecounter(
+            counter_info& info, counter_path_elements& p,
+            HPX_STD_FUNCTION<discover_counter_func> const& f, error_code& ec)
+        {
+            // discover all base names
+            std::vector<counter_info> counter_infos;
+            counter_status status = discover_counter_type(p.parentinstancename_,
+                counter_infos, discover_counters_full, ec);
+            if (!status_is_valid(status) || ec)
+                return false;
+
+            counter_info i = info;
+            BOOST_FOREACH(counter_info& basei, counter_infos)
+            {
+                p.parentinstancename_ = basei.fullname_;
+                counter_status status = get_counter_name(p, i.fullname_, ec);
+                if (!status_is_valid(status) || !f(i, ec) || ec)
+                    return false;
+            }
+            return true;
+        }
+
+        ///////////////////////////////////////////////////////////////////////
+        // expand main counter name
         bool expand_counter_info_threads(
             counter_info& i, counter_path_elements& p,
             HPX_STD_FUNCTION<discover_counter_func> const& f, error_code& ec)
@@ -699,17 +757,6 @@ namespace hpx { namespace performance_counters
                     return false;
             }
             return true;
-        }
-
-        inline bool is_thread_kind(std::string const& pattern)
-        {
-            return pattern.find("-thread#*") == pattern.size() - 9;
-        }
-
-        inline std::string get_thread_kind(std::string const& pattern)
-        {
-            BOOST_ASSERT(is_thread_kind(pattern));
-            return pattern.substr(0, pattern.find_last_of('-'));
         }
 
         bool expand_counter_info_localities(
@@ -737,7 +784,6 @@ namespace hpx { namespace performance_counters
                         return false;
                 }
             }
-
             return true;
         }
     }
@@ -748,15 +794,22 @@ namespace hpx { namespace performance_counters
     bool expand_counter_info(counter_info const& info,
         HPX_STD_FUNCTION<discover_counter_func> const& f, error_code& ec)
     {
-        counter_info i = info;
-
-        // first expand "locality*"
         counter_path_elements p;
-        counter_status status = get_counter_path_elements(i.fullname_, p, ec);
+        counter_status status = get_counter_path_elements(info.fullname_, p, ec);
         if (!status_is_valid(status)) return false;
 
+        // A '*' wild-card as the instance name is equivalent to no instance
+        // name at all.
+        if (p.parentinstancename_ == "*")
+        {
+            BOOST_ASSERT(p.parentinstanceindex_ == -1);
+            p.parentinstancename_.clear();
+        }
+
+        // first expand "locality*"
         if (p.parentinstancename_ == "locality#*")
         {
+            counter_info i = info;
             p.parentinstancename_ = "locality";
             return detail::expand_counter_info_localities(i, p, f, ec);
         }
@@ -764,8 +817,16 @@ namespace hpx { namespace performance_counters
         // now expand "<...>-thread#*"
         if (detail::is_thread_kind(p.instancename_))
         {
+            counter_info i = info;
             p.instancename_ = detail::get_thread_kind(p.instancename_) + "-thread";
             return detail::expand_counter_info_threads(i, p, f, ec);
+        }
+
+        // handle wild-cards in aggregate counters
+        if (p.parentinstance_is_basename_)
+        {
+            counter_info i = info;
+            return detail::expand_basecounter(i, p, f, ec);
         }
 
         // everything else is handled directly
@@ -848,7 +909,7 @@ namespace hpx { namespace performance_counters
                     throw;
                 ec = make_error_code(e.get_error(), e.what());
                 LPCS_(warning) << (boost::format("failed to create counter %s (%s)")
-                    % complemented_info.fullname_ % e.what());
+                    % remove_counter_prefix(complemented_info.fullname_) % e.what());
                 return lcos::future<naming::id_type>();
             }
         }

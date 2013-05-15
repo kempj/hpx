@@ -98,25 +98,27 @@ namespace hpx { namespace lcos
         ///
         /// \param RemoteResult [in] The type of the result to be transferred
         ///               back to this LCO instance.
-
-        // FIXME: gcc complains when the macro is used
-//         HPX_COMPONENT_DIRECT_ACTION_TPL(base_lco_with_value, set_value_nonvirt,
-//             set_value_action);
+#if defined(HPX_GCC_VERSION) && (HPX_GCC_VERSION <= 40400)
         typedef hpx::actions::direct_action1<
             base_lco_with_value, BOOST_RV_REF(RemoteResult),
             &base_lco_with_value::set_value_nonvirt
         > set_value_action;
+#else
+        HPX_DEFINE_COMPONENT_DIRECT_ACTION_TPL(base_lco_with_value,
+            set_value_nonvirt, set_value_action);
+#endif
 
         /// The \a get_value_action may be used to query the value this LCO
         /// instance exposes as its 'result' value.
-
-        // FIXME: gcc complains when the macro is used
-//         HPX_COMPONENT_DIRECT_ACTION_TPL(base_lco_with_value, get_value_nonvirt,
-//             get_value_action);
+#if defined(HPX_GCC_VERSION) && (HPX_GCC_VERSION <= 40400)
         typedef hpx::actions::direct_result_action0<
             base_lco_with_value, Result,
             &base_lco_with_value::get_value_nonvirt
         > get_value_action;
+#else
+        HPX_DEFINE_COMPONENT_DIRECT_ACTION_TPL(base_lco_with_value,
+            get_value_nonvirt, get_value_action);
+#endif
     };
 
     /// The base_lco<void> specialization is used whenever the set_event action
@@ -143,11 +145,10 @@ namespace hpx { namespace lcos
 
 namespace hpx { namespace traits
 {
+    // define component type data base entry generator
     template <typename Result, typename RemoteResult, typename Enable>
     struct component_type_database<
-            hpx::lcos::base_lco_with_value<Result, RemoteResult>
-          , Enable
-        >
+        hpx::lcos::base_lco_with_value<Result, RemoteResult>, Enable>
     {
         static components::component_type get()
         {
@@ -171,6 +172,9 @@ namespace hpx { namespace traits
     HPX_REGISTER_TYPED_CONTINUATION_DECLARATION(                                \
         Value                                                                   \
       , BOOST_PP_CAT(typed_continuation_, Name))                                \
+    HPX_ACTION_USES_MESSAGE_COALESCING_NOTHROW(                                 \
+        hpx::lcos::base_lco_with_value<Value>::set_value_action,                \
+        "lco_set_value_action", std::size_t(-1), std::size_t(-1))               \
 /**/
 
 #define HPX_REGISTER_BASE_LCO_WITH_VALUE(Value, Name)                           \

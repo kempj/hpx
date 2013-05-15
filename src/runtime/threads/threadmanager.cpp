@@ -104,10 +104,12 @@ namespace hpx { namespace threads
         set_state_logger_("threadmanager_impl::set_state"),
         scheduler_(scheduler),
         notifier_(notifier),
-        used_processing_units_(0)
+        used_processing_units_()
     {
+        topology const& topology_ = get_topology();
+        resize(used_processing_units_, hardware_concurrency());
         for (std::size_t i = 0; i < num_threads; ++i)
-            used_processing_units_ |= scheduler_.get_pu_mask(get_topology(), i);
+            used_processing_units_ |= scheduler_.get_pu_mask(topology_, i);
     }
 
     template <typename SchedulingPolicy, typename NotificationPolicy>
@@ -733,6 +735,26 @@ namespace hpx { namespace threads
         }
     }
 
+    template <typename SchedulingPolicy, typename NotificationPolicy>
+    void threadmanager_impl<SchedulingPolicy, NotificationPolicy>::
+        interruption_point(thread_id_type id, error_code& ec)
+    {
+        if (HPX_UNLIKELY(!id)) {
+            HPX_THROWS_IF(ec, null_thread_id,
+                "threadmanager_impl::interruption_point",
+                "NULL thread id encountered");
+            return;
+        }
+
+        if (&ec != &throws)
+            ec = make_success_code();
+
+        // we know that the id is actually the pointer to the thread
+        thread_data* thrd = reinterpret_cast<thread_data*>(id);
+        if (thrd)
+            thrd->interruption_point();      // notify thread
+    }
+
 #if HPX_THREAD_MAINTAIN_THREAD_DATA
     ///////////////////////////////////////////////////////////////////////////
     template <typename SchedulingPolicy, typename NotificationPolicy>
@@ -884,8 +906,7 @@ namespace hpx { namespace threads
     {
         if (HPX_UNLIKELY(!id)) {
             HPX_THROW_EXCEPTION(null_thread_id,
-                "threadmanager_impl::at_timer",
-                "NULL thread id encountered");
+                "threadmanager_impl::at_timer", "NULL thread id encountered");
             return terminated;
         }
 
@@ -901,7 +922,7 @@ namespace hpx { namespace threads
         thread_init_data data(
             boost::bind(&threadmanager_impl::wake_timer_thread, this, id,
                 newstate, newstate_ex, priority, self_id, triggered),
-            "wake_timer", 0, priority);
+            "wake_timer", 0, thread_priority_critical);
         thread_id_type wake_id = register_thread(data, suspended, true);
 
         // create timer firing in correspondence with given time
@@ -909,7 +930,7 @@ namespace hpx { namespace threads
 
         // let the timer invoke the set_state on the new (suspended) thread
         t.async_wait(boost::bind(&threadmanager_impl::set_state, this, wake_id,
-            pending, wait_timeout, priority, boost::ref(throws)));
+            pending, wait_timeout, thread_priority_critical, boost::ref(throws)));
 
         // this waits for the thread to be reactivated when the timer fired
         // if it returns signaled the timer has been canceled, otherwise
@@ -951,7 +972,7 @@ namespace hpx { namespace threads
 
         thread_init_data data(
             boost::bind(f, this, expire_at, id, newstate, newstate_ex, priority),
-            "at_timer (expire at)", 0, priority);
+            "at_timer (expire at)", 0, thread_priority_critical);
         return register_thread(data, pending, true, ec);
     }
 
@@ -979,7 +1000,7 @@ namespace hpx { namespace threads
 
         thread_init_data data(
             boost::bind(f, this, from_now, id, newstate, newstate_ex, priority),
-            "at_timer (from now)", 0, priority);
+            "at_timer (from now)", 0, thread_priority_critical);
         return register_thread(data, pending, true, ec);
     }
 
@@ -998,7 +1019,7 @@ namespace hpx { namespace threads
                 store_state(prev_state_);
         }
 
-        bool is_valid() const { return need_restore_state_; }
+        bool valid() const { return need_restore_state_; }
 
         // allow to change the state the thread will be switched to after
         // execution
@@ -1085,9 +1106,36 @@ namespace hpx { namespace threads
 
     template <typename SchedulingPolicy, typename NotificationPolicy>
     void threadmanager_impl<SchedulingPolicy, NotificationPolicy>::
-        tfunc(std::size_t num_thread)
+        tfunc(std::size_t num_thread, topology const& topology_)
     {
-        // wait for all threads to start up before before starting px work
+        // Set the affinity for the current thread.
+        threads::mask_cref_type mask = get_pu_mask(topology_, num_thread);
+
+        LTM_(info) << "tfunc(" << num_thread
+            << "): will run on one processing unit within this mask: "
+            << std::hex << "0x" << mask;
+
+        error_code ec(lightweight);
+        topology_.set_thread_affinity_mask(mask, ec);
+        if (ec)
+        {
+            LTM_(warning) << "run: setting thread affinity on OS thread "
+                << num_thread << " failed with: " << ec.get_message();
+        }
+
+        // Setting priority of worker threads to a lower priority, this needs to
+        // be done in order to give the parcel pool threads higher priority
+        if (any(mask & get_used_processing_units()))
+        {
+            topology_.reduce_thread_priority(ec);
+            if (ec)
+            {
+                LTM_(warning) << "run: reducing thread priority on OS thread "
+                    << num_thread << " failed with: " << ec.get_message();
+            }
+        }
+
+        // wait for all threads to start up before before starting HPX work
         startup_->wait();
 
         // manage the number of this thread in its TSS
@@ -1352,17 +1400,30 @@ namespace hpx { namespace threads
 
             if (p.instancename_.empty())
             {
-                p.instancename_ = "allocator#*";
+                p.instancename_ = "total";
                 p.instanceindex_ = -1;
             }
 
             status = get_counter_name(p, i.fullname_, ec);
             if (!status_is_valid(status) || !f(i, ec) || ec)
                 return false;
-        }
-        else if (p.instancename_ == "allocator#*") {
-            BOOST_ASSERT(mode == performance_counters::discover_counters_full);
 
+            p.instancename_ = "allocator#*";
+            p.instanceindex_ = -1;
+
+            status = get_counter_name(p, i.fullname_, ec);
+            if (!status_is_valid(status) || !f(i, ec) || ec)
+                return false;
+        }
+        if (p.instancename_ == "total" && p.instanceindex_ == -1)
+        {
+            // overall counter
+            status = get_counter_name(p, i.fullname_, ec);
+            if (!status_is_valid(status) || !f(i, ec) || ec)
+                return false;
+        }
+        else if (p.instancename_ == "allocator#*")
+        {
             for (std::size_t t = 0; t < HPX_COROUTINE_NUM_ALL_HEAPS; ++t)
             {
                 p.instancename_ = "allocator";
@@ -1506,8 +1567,8 @@ namespace hpx { namespace threads
                   static_cast<std::size_t>(paths.instanceindex_), _1),
               "worker-thread", shepherd_count
             },
-            // /threads(locality#%d/total}/count/instantaneous/all
-            // /threads(locality#%d/worker-thread%d}/count/instantaneous/all
+            // /threads{locality#%d/total}/count/instantaneous/all
+            // /threads{locality#%d/worker-thread%d}/count/instantaneous/all
             { "count/instantaneous/all",
               HPX_STD_BIND(&spt::get_thread_count, &scheduler_, unknown,
                   thread_priority_default, std::size_t(-1), _1),
@@ -1516,8 +1577,8 @@ namespace hpx { namespace threads
                   static_cast<std::size_t>(paths.instanceindex_), _1),
               "worker-thread", shepherd_count
             },
-            // /threads(locality#%d/total}/count/instantaneous/active
-            // /threads(locality#%d/worker-thread%d}/count/instantaneous/active
+            // /threads{locality#%d/total}/count/instantaneous/active
+            // /threads{locality#%d/worker-thread%d}/count/instantaneous/active
             { "count/instantaneous/active",
               HPX_STD_BIND(&spt::get_thread_count, &scheduler_, active,
                   thread_priority_default, std::size_t(-1), _1),
@@ -1526,8 +1587,8 @@ namespace hpx { namespace threads
                   static_cast<std::size_t>(paths.instanceindex_), _1),
               "worker-thread", shepherd_count
             },
-            // /threads(locality#%d/total}/count/instantaneous/pending
-            // /threads(locality#%d/worker-thread%d}/count/instantaneous/pending
+            // /threads{locality#%d/total}/count/instantaneous/pending
+            // /threads{locality#%d/worker-thread%d}/count/instantaneous/pending
             { "count/instantaneous/pending",
               HPX_STD_BIND(&spt::get_thread_count, &scheduler_, pending,
                   thread_priority_default, std::size_t(-1), _1),
@@ -1536,8 +1597,8 @@ namespace hpx { namespace threads
                   static_cast<std::size_t>(paths.instanceindex_), _1),
               "worker-thread", shepherd_count
             },
-            // /threads(locality#%d/total}/count/instantaneous/suspended
-            // /threads(locality#%d/worker-thread%d}/count/instantaneous/suspended
+            // /threads{locality#%d/total}/count/instantaneous/suspended
+            // /threads{locality#%d/worker-thread%d}/count/instantaneous/suspended
             { "count/instantaneous/suspended",
               HPX_STD_BIND(&spt::get_thread_count, &scheduler_, suspended,
                   thread_priority_default, std::size_t(-1), _1),
@@ -1556,8 +1617,8 @@ namespace hpx { namespace threads
                   static_cast<std::size_t>(paths.instanceindex_), _1),
               "worker-thread", shepherd_count
             },
-            // /threads(locality#%d/total}/count/instantaneous/staged
-            // /threads(locality#%d/worker-thread%d}/count/instantaneous/staged
+            // /threads{locality#%d/total}/count/instantaneous/staged
+            // /threads{locality#%d/worker-thread%d}/count/instantaneous/staged
             { "count/instantaneous/staged",
               HPX_STD_BIND(&spt::get_thread_count, &scheduler_, staged,
                   thread_priority_default, std::size_t(-1), _1),
@@ -1566,30 +1627,33 @@ namespace hpx { namespace threads
                   static_cast<std::size_t>(paths.instanceindex_), _1),
               "worker-thread", shepherd_count
             },
-            // /threads(locality#%d/total}/count/stack-recycles
+            // /threads{locality#%d/total}/count/stack-recycles
             { "count/stack-recycles",
               HPX_STD_BIND(&coroutine_type::impl_type::get_stack_recycle_count, _1),
               HPX_STD_FUNCTION<boost::uint64_t(bool)>(), "", 0
             },
 #if !defined(BOOST_WINDOWS) && !defined(HPX_COROUTINE_USE_GENERIC_CONTEXT)
-            // /threads(locality#%d/total}/count/stack-unbinds
+            // /threads{locality#%d/total}/count/stack-unbinds
             { "count/stack-unbinds",
               HPX_STD_BIND(&coroutine_type::impl_type::get_stack_unbind_count, _1),
               HPX_STD_FUNCTION<boost::uint64_t(bool)>(), "", 0
             },
 #endif
-            // /threads(locality#%d/total}/count/objects
-            // /threads(locality#%d/allocator%d)/count/objects
+            // /threads{locality#%d/total}/count/objects
+            // /threads{locality#%d/allocator%d}/count/objects
             { "count/objects",
               &coroutine_type::impl_type::get_allocation_count_all,
               HPX_STD_BIND(&coroutine_type::impl_type::get_allocation_count,
                   static_cast<std::size_t>(paths.instanceindex_), _1),
               "allocator", HPX_COROUTINE_NUM_ALL_HEAPS
             },
-            // /threads(locality#%d/total}/count/stolen
+            // /threads{locality#%d/total}/count/stolen
+            // /threads{locality#%d/worker-thread%d}/count/stolen
             { "count/stolen",
-              &coroutine_type::impl_type::get_allocation_count_all,
-              HPX_STD_BIND(&spt::get_num_stolen_threads, &scheduler_, _1),
+              HPX_STD_BIND(&spt::get_num_stolen_threads, &scheduler_,
+                  std::size_t(-1), _1),
+              HPX_STD_BIND(&spt::get_num_stolen_threads, &scheduler_,
+                  static_cast<std::size_t>(paths.instanceindex_), _1),
               "worker-thread", shepherd_count
             },
         };
@@ -1725,7 +1789,7 @@ namespace hpx { namespace threads
               "returns the overall number of HPX-threads stolen from neighboring"
               "schedulers for the referenced locality", HPX_PERFORMANCE_COUNTER_V1,
               counts_creator,
-              &performance_counters::locality_counter_discoverer,
+              &performance_counters::locality_thread_counter_discoverer,
               ""
             },
         };
@@ -1747,23 +1811,6 @@ namespace hpx { namespace threads
 
         boost::int64_t idle_loop_count = 0;
         boost::int64_t busy_loop_count = 0;
-
-        // set affinity on Linux systems or when using HWLOC
-        topology const& topology_ = get_topology();
-        std::size_t mask = get_pu_mask(topology_, num_thread);
-
-        LTM_(info) << "tfunc(" << num_thread
-            << "): will run on one processing unit within this mask: "
-            << std::hex << "0x" << mask;
-
-        error_code ec(lightweight);
-        topology_.set_thread_affinity_mask(mask, ec);
-
-        if (ec)
-        {
-            LTM_(warning) << "run: setting thread affinity on OS thread "
-                << num_thread << " failed with: " << ec.get_message();
-        }
 
         // run the work queue
         hpx::util::coroutines::prepare_main_thread main_thread;
@@ -1802,7 +1849,7 @@ namespace hpx { namespace threads
                         // tries to set state to active (only if state is still
                         // the same as 'state')
                         switch_status thrd_stat (thrd, state);
-                        if (thrd_stat.is_valid() && thrd_stat.get_previous() == pending) {
+                        if (thrd_stat.valid() && thrd_stat.get_previous() == pending) {
                             // thread returns new required state
                             // store the returned state in the thread
                             {
@@ -1810,9 +1857,6 @@ namespace hpx { namespace threads
                                 util::itt::caller_context cctx(ctx);
                                 util::itt::undo_frame_context undoframe(fctx);
                                 util::itt::task task(domain, thrd->get_description());
-#endif
-#if defined(HPX_HAVE_APEX)
-                                util::apex_wrapper apex("hpx-user-level-thread");
 #endif
 
                                 // Record time elapsed in thread changing state
@@ -1852,8 +1896,8 @@ namespace hpx { namespace threads
 
                     write_new_state_log_debug(num_thread, thrd, state_val, "normal");
 
-                    // Re-add this work item to our list of work items if the PX
-                    // thread should be re-scheduled. If the PX thread is suspended
+                    // Re-add this work item to our list of work items if the HPX
+                    // thread should be re-scheduled. If the HPX thread is suspended
                     // now we just keep it in the map of threads.
                     if (state_val == pending) {
                         // schedule other work
@@ -1862,8 +1906,8 @@ namespace hpx { namespace threads
 
                         // schedule this thread again, make sure it ends up at
                         // the end of the queue
-                        // REVIEW: Passing a specific target thread may screw
-                        // with the round robin queuing.
+                        // REVIEW: Passing a specific target thread may mess
+                        //         with the round robin queuing.
                         scheduler_.schedule_thread_last(thrd, num_thread);
                         do_some_work(num_thread);
                     }
@@ -1883,18 +1927,22 @@ namespace hpx { namespace threads
                     scheduler_.schedule_thread(thrd, num_thread);
                 }
 
-                // Remove the mapping from thread_map_ if PX thread is depleted
-                // or terminated, this will delete the PX thread as all
+                // Remove the mapping from thread_map_ if HPX thread is depleted
+                // or terminated, this will delete the HPX thread as all
                 // references go out of scope.
-                // REVIEW: what has to be done with depleted PX threads?
+                // REVIEW: what has to be done with depleted HPX threads?
                 if (state_val == depleted || state_val == terminated)
                     scheduler_.destroy_thread(thrd, busy_loop_count);
 
                 tfunc_time = util::hardware::timestamp() - overall_timestamp;
+                // If we idle for some time, yield control to the OS scheduler
+                // so other threads (like for example the parcelpool threads)
+                // may be scheduled
             }
 
             // if nothing else has to be done either wait or terminate
             else {
+                // create new threads from task descriptions, if available
                 if (scheduler_.wait_or_add_new(num_thread,
                         state_.load() == running, idle_loop_count))
                 {
@@ -1902,11 +1950,17 @@ namespace hpx { namespace threads
                     count.exit();
                     break;
                 }
+
+                if (0 == num_thread) {
+                    // do background work in parcel layer
+                    hpx::parcelset::flush_buffers();
+                }
             }
 
             // Clean up all terminated threads for all thread queues once in a
             // while.
             if (busy_loop_count > HPX_BUSY_LOOP_COUNT_MAX) {
+                // do background work in the scheduler
                 busy_loop_count = 0;
                 scheduler_.cleanup_terminated(true);
             }
@@ -1916,7 +1970,7 @@ namespace hpx { namespace threads
         tfunc_time = util::hardware::timestamp() - overall_timestamp;
 
 #if HPX_DEBUG != 0
-        // the last OS thread is allowed to exit only if no more PX threads exist
+        // the OS thread is allowed to exit only if no more HPX threads exist
         BOOST_ASSERT(!scheduler_.get_thread_count(
             unknown, thread_priority_default, num_thread));
 #endif
@@ -1927,7 +1981,8 @@ namespace hpx { namespace threads
     bool threadmanager_impl<SchedulingPolicy, NotificationPolicy>::
         run(std::size_t num_threads)
     {
-        LTM_(info) << "run: " << threads::hardware_concurrency() << " number of cores available";
+        LTM_(info) << "run: " << threads::hardware_concurrency()
+                   << " number of cores available";
         LTM_(info) << "run: creating " << num_threads << " OS thread(s)";
 
         if (0 == num_threads) {
@@ -1957,7 +2012,7 @@ namespace hpx { namespace threads
 
             std::size_t thread_num = num_threads;
             while (thread_num-- != 0) {
-                std::size_t mask = get_pu_mask(topology_, thread_num);
+                threads::mask_cref_type mask = get_pu_mask(topology_, thread_num);
 
                 LTM_(info) << "run: create OS thread " << thread_num
                     << ": will run on one processing unit within this mask: "
@@ -1965,12 +2020,11 @@ namespace hpx { namespace threads
 
                 // create a new thread
                 threads_.push_back(new boost::thread(boost::bind(
-                    &threadmanager_impl::tfunc, this, thread_num)));
+                    &threadmanager_impl::tfunc, this, thread_num, boost::ref(topology_))));
 
                 // set the new threads affinity (on Windows systems)
                 error_code ec(lightweight);
                 topology_.set_thread_affinity_mask(threads_.back(), mask, ec);
-
                 if (ec)
                 {
                     LTM_(warning) << "run: setting thread affinity on OS "
@@ -2092,7 +2146,7 @@ namespace hpx { namespace threads
     {
         double const exec_time = static_cast<double>(exec_times[num_thread]);
         double const tfunc_time = static_cast<double>(tfunc_times[num_thread]);
-        double const percent = (tfunc_time != 0.) ? 1. - (exec_time / tfunc_time) : 1.;
+        double const percent = (tfunc_time != 0.) ? 1. - (exec_time / tfunc_time) : 1.; //-V550
 
         if (reset) {
             exec_times[num_thread] = 0;
@@ -2110,7 +2164,8 @@ namespace hpx { namespace threads
     {
         scheduler_.periodic_maintenance(state_.load() == running);
 
-        boost::posix_time::milliseconds expire(1000);
+        boost::posix_time::milliseconds expire(SchedulingPolicy::value);
+
         // create timer firing in correspondence with given time
         boost::asio::deadline_timer t (timer_pool_.get_io_service(), expire);
 
@@ -2129,7 +2184,8 @@ namespace hpx { namespace threads
 
         if(state_.load() == running)
         {
-            boost::posix_time::milliseconds expire(1000);
+            boost::posix_time::milliseconds expire(SchedulingPolicy::value);
+
             // create timer firing in correspondence with given time
             boost::asio::deadline_timer t (timer_pool_.get_io_service(), expire);
 
