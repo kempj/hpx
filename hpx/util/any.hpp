@@ -75,11 +75,17 @@ namespace hpx { namespace util
         template <typename T>
         struct get_table;
 
+        struct fxn_ptr_table_virtbase
+        {
+            virtual ~fxn_ptr_table_virtbase() {}
+        };
+
         // serializable function pointer table
         template <typename IArchive, typename OArchive, typename Char>
-        struct fxn_ptr_table
+        struct fxn_ptr_table : fxn_ptr_table_virtbase
         {
             virtual fxn_ptr_table * get_ptr() = 0;
+
             boost::detail::sp_typeinfo const& (*get_type)();
             void (*static_delete)(void**);
             void (*destruct)(void**);
@@ -98,7 +104,7 @@ namespace hpx { namespace util
 
         // function pointer table
         template <typename Char>
-        struct fxn_ptr_table<void, void, Char>
+        struct fxn_ptr_table<void, void, Char> : fxn_ptr_table_virtbase
         {
             virtual fxn_ptr_table * get_ptr() = 0;
             boost::detail::sp_typeinfo const& (*get_type)();
@@ -351,11 +357,11 @@ namespace hpx { namespace util
         {
             template <typename Archive>
             void serialize(Archive & ar, unsigned) {}
-            bool operator==(empty const&) const 
+            bool operator==(empty const&) const
             {
                 return false; // undefined
             }
-            bool operator!=(empty const&) const 
+            bool operator!=(empty const&) const
             {
                 return false; // undefined
             }
@@ -395,6 +401,28 @@ HPX_SERIALIZATION_REGISTER_TEMPLATE(
   , (hpx::util::detail::any::fxn_ptr<IArchive, OArchive, Vtable, Char>)
 )
 
+///////////////////////////////////////////////////////////////////////////////
+// disable tracking for function pointer table
+namespace boost { namespace serialization
+{
+    template <>
+    struct tracking_level<hpx::util::detail::any::fxn_ptr_table_virtbase>
+      : boost::mpl::int_<boost::serialization::track_never>
+    {};
+
+    template <typename IArchive, typename OArchive, typename Char>
+    struct tracking_level<
+            hpx::util::detail::any::fxn_ptr_table<IArchive, OArchive, Char> >
+      : boost::mpl::int_<boost::serialization::track_never>
+    {};
+
+    template <typename IArchive, typename OArchive, typename Vtable, typename Char>
+    struct tracking_level<
+            hpx::util::detail::any::fxn_ptr<IArchive, OArchive, Vtable, Char> >
+      : boost::mpl::int_<boost::serialization::track_never>
+    {};
+}}
+
 namespace hpx { namespace util
 {
     ///////////////////////////////////////////////////////////////////////////
@@ -426,7 +454,7 @@ namespace hpx { namespace util
         }
 
         template <typename T>
-        basic_any(T const& x)
+        explicit basic_any(T const& x)
           : table(detail::any::get_table<
                       typename boost::remove_const<
                           typename util::detail::remove_reference<T>::type
@@ -457,10 +485,10 @@ namespace hpx { namespace util
 
         // Perfect forwarding of T
         template <typename T>
-        basic_any(T&& x, 
+        explicit basic_any(T&& x,
             typename boost::disable_if<
                 boost::is_same<
-                    basic_any, 
+                    basic_any,
                     typename boost::remove_const<
                         typename util::detail::remove_reference<T>::type
                     >::type
@@ -701,6 +729,7 @@ namespace hpx { namespace util
         void* object;
     };
 
+    ///////////////////////////////////////////////////////////////////////////
     template <typename IArchive_, typename OArchive_, typename Char_>
     std::basic_istream<Char_>&
         operator>> (std::basic_istream<Char_>& i,
@@ -743,7 +772,7 @@ namespace hpx { namespace util
         }
 
         template <typename T>
-        basic_any(T const& x)
+        explicit basic_any(T const& x)
           : table(detail::any::get_table<
                       typename boost::remove_const<
                           typename util::detail::remove_reference<T>::type
@@ -774,10 +803,10 @@ namespace hpx { namespace util
 
         // Perfect forwarding of T
         template <typename T>
-        basic_any(T&& x, 
+        explicit basic_any(T&& x,
             typename boost::disable_if<
                 boost::is_same<
-                    basic_any, 
+                    basic_any,
                     typename boost::remove_const<
                         typename util::detail::remove_reference<T>::type
                     >::type
@@ -1045,7 +1074,7 @@ namespace hpx { namespace util
 
     ///////////////////////////////////////////////////////////////////////////////
     // backwards compatibility
-    typedef basic_any<portable_binary_iarchive, portable_binary_oarchive> any;
+    typedef basic_any<portable_binary_iarchive, portable_binary_oarchive, char> any;
     typedef basic_any<portable_binary_iarchive, portable_binary_oarchive, wchar_t> wany;
 
     typedef basic_any<void, void, char> any_nonser;
@@ -1064,7 +1093,6 @@ namespace hpx { namespace util
                 portable_binary_oarchive ar (
                         data, 0, boost::archive::no_header);
                 ar << elem;
-
             }  // let archive go out of scope
 
             // now 'data' has the serialized binary byte stream
