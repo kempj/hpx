@@ -13,9 +13,11 @@ namespace hpx { namespace lcos { namespace local {
 void run_composable(guard_task *task);
 void run_async(guard_task *task);
 
+#define ASSERTX(X) if(!(X)) abort();
+
 // A link in the list of tasks attached
 // to a guard
-struct guard_task {
+struct guard_task : DebugObject {
     boost::atomic<guard_task *> next;
     boost::function<void()> run;
     boost::atomic<signed char> refcnt;
@@ -28,7 +30,8 @@ struct guard_task {
 void free(guard_task *task) {
     if(task == NULL)
         return;
-    BOOST_ASSERT(task->refcnt>0);
+    task->check();
+    ASSERTX(task->refcnt>0);
     if(--task->refcnt == 0) {
         delete task;
     }
@@ -41,11 +44,12 @@ boost::int64_t sort_guard(boost::shared_ptr<guard> l1,boost::shared_ptr<guard> l
 void guard_set::sort() {
     if(!sorted) {
         std::sort(guards.begin(),guards.end(),sort_guard);
+        (*guards.begin())->check();
         sorted = true;
     }
 }
 
-struct stage_data {
+struct stage_data : public DebugObject {
     guard_set gs;
     boost::function<void()> task;
     guard_task **stages;
@@ -58,9 +62,11 @@ struct stage_data {
 };
 
 void run_guarded(guard& g,guard_task *task) {
-    BOOST_ASSERT(task != NULL);
+    ASSERTX(task != NULL);
+    task->check();
     guard_task *prev = g.task.exchange(task);
     if(prev != NULL) {
+    	prev->check();
         guard_task *zero = NULL;
         if(!prev->next.compare_exchange_strong(zero,task)) {
             run_async(task);
@@ -83,10 +89,11 @@ struct stage_task_cleanup {
         // continue processing.
         for(std::size_t k=0;k<n;k++) {
             guard_task *lt = sd->stages[k];
-            BOOST_ASSERT(!lt->single_guard);
+            lt->check();
+            ASSERTX(!lt->single_guard);
             zero = NULL;
             if(!lt->next.compare_exchange_strong(zero,lt)) {
-                BOOST_ASSERT(zero != lt);
+                ASSERTX(zero != lt);
                 run_async(zero);
             }
             free(lt);
@@ -104,7 +111,7 @@ void stage_task(stage_data *sd,std::size_t i,std::size_t n) {
         std::size_t k = i + 1;
         guard_task *stage = sd->stages[k];
         stage->run = boost::bind(stage_task,sd,k,n);
-        BOOST_ASSERT(!stage->single_guard);
+        ASSERTX(!stage->single_guard);
         run_guarded(*sd->gs.get(k),stage);
     }
 }
@@ -127,6 +134,7 @@ void run_guarded(guard_set& guards,boost::function<void()> task) {
         return;
     } else if(n == 1) {
         run_guarded(*guards.guards[0],task);
+        guards.check();
         return;
     }
     stage_data *sd = new stage_data(task,guards.guards);
@@ -144,7 +152,8 @@ void run_guarded(guard& guard,boost::function<void()> task) {
 }
 
 void run_async(guard_task *task) {
-    BOOST_ASSERT(task != NULL);
+    ASSERTX(task != NULL);
+    task->check();
     hpx::apply(&run_composable,task);
 }
 
@@ -162,8 +171,9 @@ struct run_composable_cleanup {
         // the next field, we halt processing on items queued
         // to this guard.
         if(task->single_guard) {
+        	task->check();
             if(!task->next.compare_exchange_strong(zero,task)) {
-                BOOST_ASSERT(task->next.load()!=NULL);
+                ASSERTX(task->next.load()!=NULL);
                 run_async(zero);
             }
             free(task);
@@ -172,7 +182,8 @@ struct run_composable_cleanup {
 };
 
 void run_composable(guard_task *task) {
-    BOOST_ASSERT(task != NULL);
+    ASSERTX(task != NULL);
+    task->check();
     run_composable_cleanup rcc(task);
     task->run();
 }

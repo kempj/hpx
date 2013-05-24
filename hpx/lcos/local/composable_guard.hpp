@@ -12,11 +12,29 @@
 #include <vector>
 #include <iostream>
 
+const int DEBUG_MAGIC = 0x2cab;
+struct DebugObject {
+	int magic;
+	DebugObject() : magic(DEBUG_MAGIC) {}
+	~DebugObject() {
+		check();
+		magic = ~DEBUG_MAGIC;
+	}
+	void check() {
+		if(magic == ~DEBUG_MAGIC) {
+			abort();
+		}
+		if(magic != DEBUG_MAGIC) {
+			abort();
+		}
+	}
+};
+
 namespace hpx { namespace lcos { namespace local {
 struct guard_task;
 
-struct guard {
-    boost::atomic<guard_task *> task;
+struct guard : DebugObject {
+    std::atomic<guard_task *> task;
 
     guard() : task((guard_task *)0) {}
     ~guard() {
@@ -24,7 +42,7 @@ struct guard {
     }
 };
 
-class guard_set {
+class guard_set : DebugObject {
     std::vector<boost::shared_ptr<guard> > guards;
     // the guards need to be sorted, but we don't
     // want to sort them more often than necessary
