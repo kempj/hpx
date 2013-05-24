@@ -18,9 +18,9 @@ void run_async(guard_task *task);
 // A link in the list of tasks attached
 // to a guard
 struct guard_task : DebugObject {
-    boost::atomic<guard_task *> next;
+    guard_atomic next;
     boost::function<void()> run;
-    boost::atomic<signed char> refcnt;
+    char_atomic refcnt;
     const bool single_guard;
 
     guard_task() : next((guard_task *)0), run(0), refcnt(2), single_guard(true) {}

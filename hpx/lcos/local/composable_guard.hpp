@@ -33,8 +33,11 @@ struct DebugObject {
 namespace hpx { namespace lcos { namespace local {
 struct guard_task;
 
+typedef std::atomic<guard_task *> guard_atomic;
+typedef boost::atomic<signed char> char_atomic;
+
 struct guard : DebugObject {
-    std::atomic<guard_task *> task;
+    guard_atomic task;
 
     guard() : task((guard_task *)0) {}
     ~guard() {
