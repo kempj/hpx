@@ -18,6 +18,7 @@ set(tests
     future
     future_wait
     local_barrier
+    local_dataflow
     local_event
     local_mutex
     packaged_action

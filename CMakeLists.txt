@@ -157,8 +157,12 @@ else()
   set(BOOST_LIBRARIES ${BOOST_LIBRARIES} chrono)
 endif()
 if(HPX_USE_GENERIC_COROUTINE_CONTEXT)
-  hpx_add_definitions("-DHPX_HAVE_GENERIC_CONTEXT_COROUTINES=1")
-  set(BOOST_LIBRARIES ${BOOST_LIBRARIES} context)
+  if(${BOOST_MINOR_VERSION} GREATER 50)
+    hpx_add_definitions("-DHPX_HAVE_GENERIC_CONTEXT_COROUTINES=1")
+    set(BOOST_LIBRARIES ${BOOST_LIBRARIES} context)
+  else()
+    hpx_error("boost_version" "Boost V1.51.0 or higher is required to use the Boost.Context library.")
+  endif()
 endif()
 if(${BOOST_MINOR_VERSION} LESS 53)
   hpx_include_directories(${hpx_SOURCE_DIR}/external/lockfree)
@@ -774,6 +778,11 @@ if(MSVC)
     # Boost.Lockfree triggers 'warning C4307: '+' : integral constant overflow'
     # which is benign
     hpx_append_flag(-wd4307)
+
+    if(MSVC11)
+      # MSVC2012 is overeager to report 'qualifier applied to function type has no meaning; ignored'
+      hpx_append_flag(-wd4180)
+    endif()
 
     # According to the ifort Windows manual, W3 isn't supported
     hpx_append_flag(-W1 LANGUAGES Fortran)
@@ -1543,7 +1552,7 @@ set(boost_library_info "")
 
 foreach(library ${BOOST_LIBRARIES})
   string(TOUPPER ${library} library_uc)
-  string(REGEX REPLACE "([ ()])" "\\\\\\1" BOOST_${library_uc}_LIBRARY ${BOOST_${library_uc}_LIBRARY})
+  string(REGEX REPLACE "([ ()])" "\\\\\\1" "BOOST_${library_uc}_LIBRARY" "${BOOST_${library_uc}_LIBRARY}")
   set(boost_library_info
     "${boost_library_info}set(HPX_BOOST_${library_uc}_LIBRARY ${BOOST_${library_uc}_LIBRARY}\n")
   set(boost_library_info

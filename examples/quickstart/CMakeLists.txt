@@ -48,6 +48,7 @@ endif()
 if(NOT MSVC10)
   set(example_programs ${example_programs}
       fibonacci_await
+      fibonacci_futures_distributed
      )
 endif()
 
