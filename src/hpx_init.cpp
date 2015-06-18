@@ -644,10 +644,11 @@ namespace hpx
         }
 #endif
 
-#if defined(HPX_HAVE_OMP_DUAL)
+#if defined(HPX_HAVE_OMP_DUAL_SCHEDULER)
         int run_omp_dual(startup_function_type const& startup,
             shutdown_function_type const& shutdown,
-            util::command_line_handling& cfg, bool blocking) {
+            util::command_line_handling& cfg, bool blocking)
+        {
             ensure_hierarchy_arity_compatibility(cfg.vm_);
 
             std::size_t num_high_priority_queues = cfg.num_threads_;
@@ -1166,7 +1167,7 @@ namespace hpx
 #endif
                 }
                 else if (0 == std::string("omp-dual").find(cfg.queuing_)) {
-#if defined(HPX_HAVE_OMP_DUAL)
+#if defined(HPX_HAVE_OMP_DUAL_SCHEDULER)
                     cfg.queuing_ = "omp-dual";
                     result = detail::run_omp_dual(startup, shutdown, cfg, blocking);
 #else

@@ -197,7 +197,7 @@ namespace hpx
                      >
             class HPX_EXPORT local_queue_scheduler;
 
-#if defined(HPX_HAVE_OMP_DUAL)
+#if defined(HPX_HAVE_OMP_DUAL_SCHEDULER)
             template <typename Mutex = boost::mutex
                     , typename PendingQueuing = lockfree_fifo
                     , typename StagedQueuing = lockfree_fifo
