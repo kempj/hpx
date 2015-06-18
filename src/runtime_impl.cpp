@@ -737,6 +737,13 @@ template class HPX_EXPORT hpx::runtime_impl<
     hpx::threads::policies::callback_notifier>;
 #endif
 
+#if defined(HPX_HAVE_OMP_DUAL)
+#include <hpx/runtime/threads/policies/omp_dual_queue_scheduler.hpp>
+template class HPX_EXPORT hpx::runtime_impl<
+    hpx::threads::policies::omp_dual_queue_scheduler<>,
+    hpx::threads::policies::callback_notifier>;
+#endif
+
 #include <hpx/runtime/threads/policies/local_priority_queue_scheduler.hpp>
 template class HPX_EXPORT hpx::runtime_impl<
     hpx::threads::policies::local_priority_queue_scheduler<>,
