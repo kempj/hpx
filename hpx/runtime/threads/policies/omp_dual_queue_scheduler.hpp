@@ -29,14 +29,6 @@
 namespace hpx { namespace threads { namespace policies
 {
 
-    ///////////////////////////////////////////////////////////////////////////
-    /// The omp_dual_queue_scheduler maintains exactly one queue of work
-    /// items (threads) per OS thread, where this OS thread pulls its next work
-    /// from. Additionally it maintains separate queues: several for high
-    /// priority threads and one for low priority threads.
-    /// High priority threads are executed by the first N OS threads before any
-    /// other work is executed. Low priority threads are executed by the last
-    /// OS thread whenever no other work is available.
     template <typename Mutex
             , typename PendingQueuing
             , typename StagedQueuing
