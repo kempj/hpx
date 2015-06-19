@@ -163,6 +163,7 @@ namespace hpx { namespace threads { namespace policies
             thread_state_enum initial_state, bool run_now, error_code& ec,
             std::size_t num_thread)
         {
+            //std::cout << "create thread\n" << std::endl;
             std::size_t queue_size = queues_.size();
 
             if (std::size_t(-1) == num_thread)
@@ -173,12 +174,6 @@ namespace hpx { namespace threads { namespace policies
 
             // now create the thread
             
-            //JK: TODO: is this the (only) place where suspended tasks are added to the queue?
-            if (initial_state == suspended) {
-                std::size_t num = num_thread % tied_queues_.size();
-                tied_queues_[num]->create_thread(data, id, initial_state, run_now, ec);
-                return;
-            }
             if (data.priority == thread_priority_critical) {
                 std::size_t num = num_thread % high_priority_queues_.size();
                 high_priority_queues_[num]->create_thread(data, id, initial_state, run_now, ec);
@@ -208,8 +203,7 @@ namespace hpx { namespace threads { namespace policies
             std::size_t queues_size = queues_.size();
             std::size_t high_priority_queues = high_priority_queues_.size();
 
-            if (num_thread < tied_queues_.size())
-            {
+            if (num_thread < tied_queues_.size()) {
                 thread_queue_type* q = tied_queues_[num_thread];
                 bool result = q->get_next_thread(thrd);
 
@@ -218,9 +212,7 @@ namespace hpx { namespace threads { namespace policies
                     return true;
                 q->increment_num_pending_misses();
             }
-
-            if (num_thread < high_priority_queues)
-            {
+            if (num_thread < high_priority_queues) {
                 thread_queue_type* q = high_priority_queues_[num_thread];
                 bool result = q->get_next_thread(thrd);
 
@@ -248,7 +240,6 @@ namespace hpx { namespace threads { namespace policies
                     return false;
             }
 
-            //This seems like the workstealing portion
             for (std::size_t i = 1; i != queues_size; ++i) {
                 std::size_t const idx = (i + num_thread) % queues_size;
 
@@ -283,7 +274,15 @@ namespace hpx { namespace threads { namespace policies
             if (std::size_t(-1) == num_thread)
                 num_thread = ++curr_queue_ % queues_.size();
 
-            //TODO: do I need to do anything here for tied tasks?
+            //assuming all tasks that are coming in here need to be tied.
+            //auto initial_state = thrd->get_state();
+            //if (initial_state == suspended) {
+            std::size_t num = num_thread % tied_queues_.size();
+            //std::cout << "schedule thread: " << num << std::endl;
+            tied_queues_[num]->schedule_thread(thrd);//(data, id, initial_state, run_now, ec);
+            //    return;
+            //}
+            /*
             if (priority == thread_priority_critical ||
                 priority == thread_priority_boost)
             {
@@ -297,6 +296,7 @@ namespace hpx { namespace threads { namespace policies
                 HPX_ASSERT(num_thread < queues_.size());
                 queues_[num_thread]->schedule_thread(thrd);
             }
+            */
         }
 
         void schedule_thread_last(threads::thread_data_base* thrd,
