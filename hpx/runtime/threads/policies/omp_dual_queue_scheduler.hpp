@@ -203,6 +203,8 @@ namespace hpx { namespace threads { namespace policies
             std::size_t queues_size = queues_.size();
             std::size_t high_priority_queues = high_priority_queues_.size();
 
+            num_thread = get_worker_thread_num();
+
             if (num_thread < tied_queues_.size()) {
                 thread_queue_type* q = tied_queues_[num_thread];
                 bool result = q->get_next_thread(thrd);
@@ -271,33 +273,12 @@ namespace hpx { namespace threads { namespace policies
             std::size_t num_thread,
             thread_priority priority = thread_priority_normal)
         {
-            HPX_ASSERT(num_thread != std::size_t(-1));
-            //This doesn't work with OpenMP
-            //if (std::size_t(-1) == num_thread)
-            //    num_thread = ++curr_queue_ % queues_.size();
-
             //assuming all tasks that are coming in here need to be tied.
-            //std::size_t num = num_thread % tied_queues_.size();
-            //TODO: print ID?
+            
             //std::cout << "schedule thread: " << num_thread << std::endl;
             num_thread = get_worker_thread_num();
             if(num_thread < tied_queues_.size())
                 tied_queues_[num_thread]->schedule_thread(thrd);
-            /*
-            if (priority == thread_priority_critical ||
-                priority == thread_priority_boost)
-            {
-                std::size_t num = num_thread % high_priority_queues_.size();
-                high_priority_queues_[num]->schedule_thread(thrd);
-            }
-            else if (priority == thread_priority_low) {
-                low_priority_queue_.schedule_thread(thrd);
-            }
-            else {
-                HPX_ASSERT(num_thread < queues_.size());
-                queues_[num_thread]->schedule_thread(thrd);
-            }
-            */
         }
 
         void schedule_thread_last(threads::thread_data_base* thrd,
@@ -305,29 +286,8 @@ namespace hpx { namespace threads { namespace policies
             thread_priority priority = thread_priority_normal)
         {
             
-            HPX_ASSERT(num_thread != std::size_t(-1));
-
-            if (std::size_t(-1) == num_thread)
-                num_thread = ++curr_queue_ % queues_.size();
-
-            std::size_t num = num_thread % tied_queues_.size();
-            num = get_worker_thread_num();
+            std::size_t num = get_worker_thread_num();
             tied_queues_[num]->schedule_thread(thrd, true);
-            /*
-            if (priority == thread_priority_critical ||
-                priority == thread_priority_boost)
-            {
-                std::size_t num = num_thread % high_priority_queues_.size();
-                high_priority_queues_[num]->schedule_thread(thrd, true);
-            }
-            else if (priority == thread_priority_low) {
-                low_priority_queue_.schedule_thread(thrd, true);
-            }
-            else {
-                HPX_ASSERT(num_thread < queues_.size());
-                queues_[num_thread]->schedule_thread(thrd, true);
-            }
-            */
         }
 
         /// Destroy the passed thread as it has been terminated
