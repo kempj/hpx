@@ -25,6 +25,10 @@
 
 #include <hpx/config/warnings_prefix.hpp>
 
+#include <hpx/include/iostreams.hpp>
+using hpx::cout;
+using hpx::endl;
+
 ///////////////////////////////////////////////////////////////////////////////
 namespace hpx { namespace threads { namespace policies
 {
@@ -186,8 +190,8 @@ namespace hpx { namespace threads { namespace policies
                 data.priority = thread_priority_normal;
                 std::size_t num = num_thread % high_priority_queues_.size();
                 high_priority_queues_[num]->create_thread(data, id, initial_state, run_now, ec);
-                std::cout << "(normal) create thread #" << num_thread << ", " << *id <<  std::endl;
-                //std::cout << thrd->get_thread_id() << 
+                cout << "(normal) create thread #" << num_thread << ", " << *id <<  endl;
+                //cout << thrd->get_thread_id() << 
                 return;
             }
 
@@ -207,6 +211,7 @@ namespace hpx { namespace threads { namespace policies
             std::size_t queues_size = queues_.size();
             std::size_t high_priority_queues = high_priority_queues_.size();
 
+            auto num = num_thread;
             num_thread = get_worker_thread_num();
 
             if (num_thread < tied_queues_.size()) {
@@ -215,7 +220,9 @@ namespace hpx { namespace threads { namespace policies
 
                 q->increment_num_pending_accesses();
                 if (result) {
-                    std::cout << " getting next thread : " << thrd->get_thread_id() <<  std::endl;
+                    cout << " Thread " <<  num_thread << "/" << num 
+                        << " getting next (tied) thread : " << thrd->get_thread_id() 
+                        <<  endl;
                     return true;
                 }
                 q->increment_num_pending_misses();
@@ -225,8 +232,9 @@ namespace hpx { namespace threads { namespace policies
                 bool result = q->get_next_thread(thrd);
 
                 q->increment_num_pending_accesses();
-                if (result)
+                if (result) {
                     return true;
+                }
                 q->increment_num_pending_misses();
             }
 
@@ -236,8 +244,9 @@ namespace hpx { namespace threads { namespace policies
                 bool result = q->get_next_thread(thrd);
 
                 q->increment_num_pending_accesses();
-                if (result)
+                if (result) {
                     return true;
+                }
                 q->increment_num_pending_misses();
 
                 bool have_staged =
@@ -281,14 +290,14 @@ namespace hpx { namespace threads { namespace policies
         {
             //assuming all tasks that are coming in here need to be tied.
             
-            //if(num_thread < tied_queues_.size())
-            //    tied_queues_[num_thread]->schedule_thread(thrd);
             std::size_t num = get_worker_thread_num();
+            if(num_thread < tied_queues_.size())
+                num = num_thread;
             tied_queues_[num]->schedule_thread(thrd);
 
-            std::cout << thrd->get_thread_id() << 
-            " - schedule thread: " << num_thread << ", " 
-                << num << std::endl;
+            cout << "Thread " << num_thread << "/" << num << 
+                " scheduling thread: " << thrd->get_thread_id() << endl;
+            //tied_queues_[num]->get_queue_length()
 
             //TODO: add low and high priority threads to the normal queues.
         }
@@ -299,10 +308,11 @@ namespace hpx { namespace threads { namespace policies
         {
             
             std::size_t num = get_worker_thread_num();
+            if(num_thread < tied_queues_.size())
+                num = num_thread;
             tied_queues_[num]->schedule_thread(thrd, true);
-            std::cout << thrd->get_thread_id() << 
-            " - schedule(last) thread: " << num_thread << ", " 
-                << num << std::endl;
+            cout << "Thread " << num_thread << "/" << num << 
+                " scheduling thread: " << thrd->get_thread_id() << endl;
             //TODO: add low and high priority threads to the normal queues.
         }
 
