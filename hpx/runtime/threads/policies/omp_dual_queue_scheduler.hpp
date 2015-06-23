@@ -163,7 +163,6 @@ namespace hpx { namespace threads { namespace policies
             thread_state_enum initial_state, bool run_now, error_code& ec,
             std::size_t num_thread)
         {
-            //std::cout << "create thread " << num_thread << std::endl;
             std::size_t queue_size = queues_.size();
 
             if (std::size_t(-1) == num_thread)
@@ -172,6 +171,9 @@ namespace hpx { namespace threads { namespace policies
             if (num_thread >= queue_size)
                 num_thread %= queue_size;
 
+            thread_id_type tmp_id;
+            if(!id) 
+                id = &tmp_id;
             // now create the thread
             
             if (data.priority == thread_priority_critical) {
@@ -184,6 +186,8 @@ namespace hpx { namespace threads { namespace policies
                 data.priority = thread_priority_normal;
                 std::size_t num = num_thread % high_priority_queues_.size();
                 high_priority_queues_[num]->create_thread(data, id, initial_state, run_now, ec);
+                std::cout << "(normal) create thread #" << num_thread << ", " << *id <<  std::endl;
+                //std::cout << thrd->get_thread_id() << 
                 return;
             }
 
@@ -210,8 +214,10 @@ namespace hpx { namespace threads { namespace policies
                 bool result = q->get_next_thread(thrd);
 
                 q->increment_num_pending_accesses();
-                if (result)
+                if (result) {
+                    std::cout << " getting next thread : " << thrd->get_thread_id() <<  std::endl;
                     return true;
+                }
                 q->increment_num_pending_misses();
             }
             if (num_thread < high_priority_queues) {
@@ -275,10 +281,14 @@ namespace hpx { namespace threads { namespace policies
         {
             //assuming all tasks that are coming in here need to be tied.
             
-            //std::cout << "schedule thread: " << num_thread << std::endl;
-            num_thread = get_worker_thread_num();
-            if(num_thread < tied_queues_.size())
-                tied_queues_[num_thread]->schedule_thread(thrd);
+            //if(num_thread < tied_queues_.size())
+            //    tied_queues_[num_thread]->schedule_thread(thrd);
+            std::size_t num = get_worker_thread_num();
+            tied_queues_[num]->schedule_thread(thrd);
+
+            std::cout << thrd->get_thread_id() << 
+            " - schedule thread: " << num_thread << ", " 
+                << num << std::endl;
         }
 
         void schedule_thread_last(threads::thread_data_base* thrd,
@@ -288,6 +298,9 @@ namespace hpx { namespace threads { namespace policies
             
             std::size_t num = get_worker_thread_num();
             tied_queues_[num]->schedule_thread(thrd, true);
+            std::cout << thrd->get_thread_id() << 
+            " - schedule(last) thread: " << num_thread << ", " 
+                << num << std::endl;
         }
 
         /// Destroy the passed thread as it has been terminated
@@ -328,14 +341,15 @@ namespace hpx { namespace threads { namespace policies
             boost::int64_t count = 0;
             if (std::size_t(-1) != num_thread) {
                 HPX_ASSERT(num_thread < queues_.size());
-
+                
                 if (num_thread < high_priority_queues_.size())
                     count = high_priority_queues_[num_thread]->get_queue_length();
 
                 if (num_thread == queues_.size()-1)
                     count += low_priority_queue_.get_queue_length();
 
-                count += tied_queues_[num_thread]->get_queue_length();
+                if (num_thread < tied_queues_.size())
+                    count += tied_queues_[num_thread]->get_queue_length();
 
                 return count + queues_[num_thread]->get_queue_length();
             }
@@ -469,6 +483,13 @@ namespace hpx { namespace threads { namespace policies
 
             std::size_t added = 0;
             bool result = true;
+
+            if (num_thread < tied_queues_.size())
+            {
+                result = tied_queues_[num_thread]->
+                    wait_or_add_new(running, idle_loop_count, added) && result;
+                if (0 != added) return result;
+            }
 
             if (num_thread < high_priority_queues_.size())
             {
