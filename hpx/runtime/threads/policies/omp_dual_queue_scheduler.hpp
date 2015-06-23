@@ -289,6 +289,8 @@ namespace hpx { namespace threads { namespace policies
             std::cout << thrd->get_thread_id() << 
             " - schedule thread: " << num_thread << ", " 
                 << num << std::endl;
+
+            //TODO: add low and high priority threads to the normal queues.
         }
 
         void schedule_thread_last(threads::thread_data_base* thrd,
@@ -301,6 +303,7 @@ namespace hpx { namespace threads { namespace policies
             std::cout << thrd->get_thread_id() << 
             " - schedule(last) thread: " << num_thread << ", " 
                 << num << std::endl;
+            //TODO: add low and high priority threads to the normal queues.
         }
 
         /// Destroy the passed thread as it has been terminated
