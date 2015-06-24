@@ -25,8 +25,6 @@
 
 #include <hpx/config/warnings_prefix.hpp>
 
-//using std::cout;
-//using std::endl;
 
 ///////////////////////////////////////////////////////////////////////////////
 namespace hpx { namespace threads { namespace policies
@@ -182,7 +180,6 @@ namespace hpx { namespace threads { namespace policies
             if (data.priority == thread_priority_critical) {
                 std::size_t num = num_thread % high_priority_queues_.size();
                 high_priority_queues_[num]->create_thread(data, id, initial_state, run_now, ec);
-                //cout << "(HP) create thread #" << num_thread << ", " << *id <<  endl;
                 return;
             }
 
@@ -190,14 +187,11 @@ namespace hpx { namespace threads { namespace policies
                 data.priority = thread_priority_normal;
                 std::size_t num = num_thread % high_priority_queues_.size();
                 high_priority_queues_[num]->create_thread(data, id, initial_state, run_now, ec);
-                //cout << "(normal) create thread #" << num_thread << ", " << *id <<  endl;
-                //cout << thrd->get_thread_id() << 
                 return;
             }
 
             if (data.priority == thread_priority_low) {
                 low_priority_queue_.create_thread(data, id, initial_state, run_now, ec);
-                //cout << "(LP) create thread #" << num_thread << ", " << *id <<  endl;
                 return;
             }
 
@@ -221,9 +215,6 @@ namespace hpx { namespace threads { namespace policies
 
                 q->increment_num_pending_accesses();
                 if (result) {
-                    //cout << " Thread " <<  num_thread << "/" << num 
-                    //    << " getting next (HP) thread : " << thrd->get_thread_id() 
-                    //    <<  endl;
                     return true;
                 }
                 q->increment_num_pending_misses();
@@ -234,9 +225,6 @@ namespace hpx { namespace threads { namespace policies
 
                 q->increment_num_pending_accesses();
                 if (result) {
-                    //cout << " Thread " <<  num_thread << "/" << num 
-                    //    << " getting next (tied) thread : " << thrd->get_thread_id() 
-                    //    <<  endl;
                     return true;
                 }
                 q->increment_num_pending_misses();
@@ -249,9 +237,6 @@ namespace hpx { namespace threads { namespace policies
 
                 q->increment_num_pending_accesses();
                 if (result) {
-                    //cout << " Thread " <<  num_thread << "/" << num 
-                    //    << " getting next (normal) thread : " << thrd->get_thread_id() 
-                    //    <<  endl;
                     return true;
                 }
                 q->increment_num_pending_misses();
@@ -311,9 +296,6 @@ namespace hpx { namespace threads { namespace policies
                 low_priority_queue_.schedule_thread(thrd);
             } else {
                 tied_queues_[num]->schedule_thread(thrd);
-                //cout << "Thread " << num << "( " << num_thread << "/" 
-                //    << get_worker_thread_num() << " ) scheduling thread: "
-                //    << thrd->get_thread_id() << endl;
                 //tied_queues_[num]->get_queue_length()
             }
         }
@@ -338,9 +320,6 @@ namespace hpx { namespace threads { namespace policies
                 low_priority_queue_.schedule_thread(thrd);
             } else {
                 tied_queues_[num]->schedule_thread(thrd);
-                //cout << "Thread " << num << "( " << num_thread << "/" 
-                //    << get_worker_thread_num() << " ) scheduling thread(last): "
-                //    << thrd->get_thread_id() << endl;
                 //tied_queues_[num]->get_queue_length()
             }
         }
