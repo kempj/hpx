@@ -131,7 +131,7 @@ class HPX(gdb.Command):
     gdb.Command.__init__(self, "hpx", gdb.COMMAND_USER, gdb.COMPLETE_NONE, True)
 
 #  def invoke(self, arg, from_tty):
-#    print "Hello World"
+#    print( "Hello World")
 
 class HPXList(gdb.Command):
   "List various HPX states"
@@ -139,7 +139,7 @@ class HPXList(gdb.Command):
     super(HPXList, self).__init__("hpx list", gdb.COMMAND_USER, gdb.COMPLETE_NONE, True)
 
   def invoke(self, arg, from_tty):
-    print "Hello World"
+    print( "Hello World")
 
 class HPXThread():
   class Context():
@@ -251,15 +251,15 @@ class HPXThread():
     return addr.reinterpret_cast(self.size_t.pointer()).dereference()
 
   def info(self):
-    print " Thread 0x%x" % self.id
+    print( " Thread 0x%x" % self.id)
     if self.m_sp.reinterpret_cast(self.m_sp.dereference().type) > self.stack_end:
-      print " This thread has a stack overflow"
-    print "  parent thread = %s" % self.parent_id
-    print "  description = " + self.description.string()
-    print "  lco_description = " + self.lco_description.string()
-    print "  state = %s" % self.state
-    print "  state_ex = %s" % self.state_ex
-    print "  pc = %s" % self.pc_string
+      print( " This thread has a stack overflow")
+    print( "  parent thread = %s" % self.parent_id)
+    print( "  description = " + self.description.string())
+    print( "  lco_description = " + self.lco_description.string())
+    print( "  state = %s" % self.state)
+    print( "  state_ex = %s" % self.state_ex)
+    print( "  pc = %s" % self.pc_string)
 
 class HPXListThreads(gdb.Command):
   '''
@@ -298,13 +298,13 @@ class HPXListThreads(gdb.Command):
 
         count = 0
         while not item == end:
-          print "Thread queue %d:" % count
+          print( "Thread queue %d:" % count)
           thread_map = Set(item.dereference().dereference()['thread_map_'])
           for k, v in thread_map:
             thread = HPXThread(v['px'])
 
             thread.info()
-            print ""
+            print( "")
           item = item + 1
           count = count + 1
 
@@ -354,7 +354,7 @@ class HPXSelectThread(gdb.Command):
   def invoke(self, arg, from_tty):
     argv = gdb.string_to_argv(arg)
     if len(argv) != 1:
-      print "Error: You need to supply at least one argument. See help hpx thread"
+      print( "Error: You need to supply at least one argument. See help hpx thread")
       return
 
     if argv[0] == "restore":
@@ -368,8 +368,8 @@ class HPXSelectThread(gdb.Command):
 
     thread = HPXThread(thread_id)
 
-    print "Switched to HPX Thread 0x%x" % thread_id
-    print thread.pc_string
+    print( "Switched to HPX Thread 0x%x" % thread_id)
+    print( thread.pc_string)
 
     state.save_context(thread.context.switch())
 
@@ -410,11 +410,11 @@ class HPXContinue(gdb.Command):
     #gdb.execute("thread %d" % cur_os_thread, False, True)
 
     if len(argv) == 0:
-      print "Continuing..."
+      print( "Continuing...")
       gdb.execute("continue")
     else:
       if argv[0] != "hook":
-          print "wrong argument ..."
+          print( "wrong argument ...")
 
 HPX()
 HPXList()
