@@ -25,9 +25,8 @@
 
 #include <hpx/config/warnings_prefix.hpp>
 
-#include <hpx/include/iostreams.hpp>
-using hpx::cout;
-using hpx::endl;
+using std::cout;
+using std::endl;
 
 ///////////////////////////////////////////////////////////////////////////////
 namespace hpx { namespace threads { namespace policies
@@ -183,6 +182,7 @@ namespace hpx { namespace threads { namespace policies
             if (data.priority == thread_priority_critical) {
                 std::size_t num = num_thread % high_priority_queues_.size();
                 high_priority_queues_[num]->create_thread(data, id, initial_state, run_now, ec);
+                cout << "(HP) create thread #" << num_thread << ", " << *id <<  endl;
                 return;
             }
 
@@ -197,6 +197,7 @@ namespace hpx { namespace threads { namespace policies
 
             if (data.priority == thread_priority_low) {
                 low_priority_queue_.create_thread(data, id, initial_state, run_now, ec);
+                cout << "(LP) create thread #" << num_thread << ", " << *id <<  endl;
                 return;
             }
 
@@ -214,6 +215,19 @@ namespace hpx { namespace threads { namespace policies
             auto num = num_thread;
             num_thread = get_worker_thread_num();
 
+            if (num_thread < high_priority_queues) {
+                thread_queue_type* q = high_priority_queues_[num_thread];
+                bool result = q->get_next_thread(thrd);
+
+                q->increment_num_pending_accesses();
+                if (result) {
+                    cout << " Thread " <<  num_thread << "/" << num 
+                        << " getting next (HP) thread : " << thrd->get_thread_id() 
+                        <<  endl;
+                    return true;
+                }
+                q->increment_num_pending_misses();
+            }
             if (num_thread < tied_queues_.size()) {
                 thread_queue_type* q = tied_queues_[num_thread];
                 bool result = q->get_next_thread(thrd);
@@ -227,16 +241,6 @@ namespace hpx { namespace threads { namespace policies
                 }
                 q->increment_num_pending_misses();
             }
-            if (num_thread < high_priority_queues) {
-                thread_queue_type* q = high_priority_queues_[num_thread];
-                bool result = q->get_next_thread(thrd);
-
-                q->increment_num_pending_accesses();
-                if (result) {
-                    return true;
-                }
-                q->increment_num_pending_misses();
-            }
 
             {
                 HPX_ASSERT(num_thread < queues_size);
@@ -245,6 +249,9 @@ namespace hpx { namespace threads { namespace policies
 
                 q->increment_num_pending_accesses();
                 if (result) {
+                    cout << " Thread " <<  num_thread << "/" << num 
+                        << " getting next (normal) thread : " << thrd->get_thread_id() 
+                        <<  endl;
                     return true;
                 }
                 q->increment_num_pending_misses();
@@ -293,27 +300,49 @@ namespace hpx { namespace threads { namespace policies
             std::size_t num = get_worker_thread_num();
             if(num_thread < tied_queues_.size())
                 num = num_thread;
-            tied_queues_[num]->schedule_thread(thrd);
 
-            cout << "Thread " << num_thread << "/" << num << 
-                " scheduling thread: " << thrd->get_thread_id() << endl;
-            //tied_queues_[num]->get_queue_length()
-
-            //TODO: add low and high priority threads to the normal queues.
+            if (priority == thread_priority_critical ||
+                priority == thread_priority_boost)
+            {
+                num = num_thread % high_priority_queues_.size();
+                high_priority_queues_[num]->schedule_thread(thrd);
+            }
+            else if (priority == thread_priority_low) {
+                low_priority_queue_.schedule_thread(thrd);
+            } else {
+                tied_queues_[num]->schedule_thread(thrd);
+                cout << "Thread " << num << "( " << num_thread << "/" 
+                    << get_worker_thread_num() << " ) scheduling thread: "
+                    << thrd->get_thread_id() << endl;
+                //tied_queues_[num]->get_queue_length()
+            }
         }
 
         void schedule_thread_last(threads::thread_data_base* thrd,
             std::size_t num_thread,
             thread_priority priority = thread_priority_normal)
-        {
+{
+            //assuming all tasks that are coming in here need to be tied.
             
             std::size_t num = get_worker_thread_num();
             if(num_thread < tied_queues_.size())
                 num = num_thread;
-            tied_queues_[num]->schedule_thread(thrd, true);
-            cout << "Thread " << num_thread << "/" << num << 
-                " scheduling thread: " << thrd->get_thread_id() << endl;
-            //TODO: add low and high priority threads to the normal queues.
+
+            if (priority == thread_priority_critical ||
+                priority == thread_priority_boost)
+            {
+                num = num_thread % high_priority_queues_.size();
+                high_priority_queues_[num]->schedule_thread(thrd);
+            }
+            else if (priority == thread_priority_low) {
+                low_priority_queue_.schedule_thread(thrd);
+            } else {
+                tied_queues_[num]->schedule_thread(thrd);
+                cout << "Thread " << num << "( " << num_thread << "/" 
+                    << get_worker_thread_num() << " ) scheduling thread(last): "
+                    << thrd->get_thread_id() << endl;
+                //tied_queues_[num]->get_queue_length()
+            }
         }
 
         /// Destroy the passed thread as it has been terminated
