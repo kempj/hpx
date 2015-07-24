@@ -25,13 +25,11 @@
 #endif
 #include <hpx/traits/action_decorate_continuation.hpp>
 #include <hpx/traits/action_does_termination_detection.hpp>
-#include <hpx/traits/action_may_require_id_splitting.hpp>
 #include <hpx/traits/action_message_handler.hpp>
 #include <hpx/traits/action_priority.hpp>
 #include <hpx/traits/action_schedule_thread.hpp>
 #include <hpx/traits/action_serialization_filter.hpp>
 #include <hpx/traits/action_stacksize.hpp>
-#include <hpx/traits/type_size.hpp>
 #include <hpx/traits/serialize_as_future.hpp>
 #include <hpx/util/move.hpp>
 #include <hpx/util/serialize_exception.hpp>
@@ -39,6 +37,7 @@
 #include <hpx/util/detail/pack.hpp>
 
 #include <boost/cstdint.hpp>
+#include <boost/mpl/bool.hpp>
 
 #include <hpx/config/warnings_prefix.hpp>
 
@@ -69,6 +68,7 @@ namespace hpx { namespace actions
         enum { stacksize_value = traits::action_stacksize<Action>::value };
 
         typedef typename Action::direct_execution direct_execution;
+        typedef boost::mpl::true_ serialized_with_id;
 
         // construct an action from its arguments
         template <typename ...Ts>
@@ -252,19 +252,6 @@ namespace hpx { namespace actions
         threads::thread_stacksize get_thread_stacksize() const
         {
             return stacksize_;
-        }
-
-        /// Return the size of action arguments in bytes
-        /// flags should contain serialization options which affect the space required
-        std::size_t get_type_size(int flags) const
-        {
-            return traits::type_size<arguments_type>::call(arguments_, flags);
-        }
-
-        /// Return whether the embedded action may require id-splitting
-        bool may_require_id_splitting() const
-        {
-            return traits::action_may_require_id_splitting<derived_type>::call(arguments_);
         }
 
         /// Wait for embedded futures to become ready

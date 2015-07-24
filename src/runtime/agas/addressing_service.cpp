@@ -10,6 +10,7 @@
 #include <hpx/hpx_fwd.hpp>
 #include <hpx/runtime.hpp>
 #include <hpx/exception.hpp>
+#include <hpx/apply.hpp>
 #include <hpx/runtime/agas/addressing_service.hpp>
 #include <hpx/runtime/agas/big_boot_barrier.hpp>
 #include <hpx/runtime/agas/component_namespace.hpp>
@@ -31,6 +32,7 @@
 #include <boost/format.hpp>
 #include <boost/icl/closed_interval.hpp>
 #include <boost/lexical_cast.hpp>
+#include <boost/thread/locks.hpp>
 
 namespace hpx { namespace agas
 {
@@ -299,7 +301,7 @@ namespace detail
 }
 
 void addressing_service::launch_bootstrap(
-    boost::shared_ptr<parcelset::parcelport> pp
+    boost::shared_ptr<parcelset::parcelport> const& pp
   , parcelset::endpoints_type const & endpoints
   , util::runtime_configuration const& ini_
     )
@@ -507,7 +509,7 @@ bool addressing_service::register_locality(
         prefix = naming::get_gid_from_locality_id(rep.get_locality_id());
 
         {
-            mutex_type::scoped_lock l(resolved_localities_mtx_);
+            boost::lock_guard<mutex_type> l(resolved_localities_mtx_);
             std::pair<resolved_localities_type::iterator, bool> res
                 = resolved_localities_.insert(std::make_pair(
                     prefix
@@ -526,7 +528,7 @@ bool addressing_service::register_locality(
 
 void addressing_service::register_console(parcelset::endpoints_type const & eps)
 {
-    mutex_type::scoped_lock l(resolved_localities_mtx_);
+    boost::lock_guard<mutex_type> l(resolved_localities_mtx_);
     std::pair<resolved_localities_type::iterator, bool> res
         = resolved_localities_.insert(std::make_pair(
             naming::get_gid_from_locality_id(0)
@@ -540,7 +542,7 @@ parcelset::endpoints_type const & addressing_service::resolve_locality(
   , error_code& ec
     )
 { // {{{
-    mutex_type::scoped_lock l(resolved_localities_mtx_);
+    boost::unique_lock<mutex_type> l(resolved_localities_mtx_);
     resolved_localities_type::iterator it = resolved_localities_.find(gid);
     if(it == resolved_localities_.end())
     {
@@ -563,7 +565,7 @@ parcelset::endpoints_type const & addressing_service::resolve_locality(
         else
         {
             {
-                hpx::util::scoped_unlock<mutex_type::scoped_lock> ul(l);
+                hpx::util::unlock_guard<boost::unique_lock<mutex_type> > ul(l);
                 future<parcelset::endpoints_type> endpoints_future =
                     hosted->locality_ns_.service_async<parcelset::endpoints_type>(
                         req
@@ -633,7 +635,7 @@ bool addressing_service::unregister_locality(
             return false;
 
         {
-            mutex_type::scoped_lock l(resolved_localities_mtx_);
+            boost::lock_guard<mutex_type> l(resolved_localities_mtx_);
             resolved_localities_type::iterator it = resolved_localities_.find(gid);
             if(it != resolved_localities_.end())
                 resolved_localities_.erase(it);
@@ -669,7 +671,7 @@ bool addressing_service::get_console_locality(
         }
 
         {
-            mutex_type::scoped_lock lock(console_cache_mtx_);
+            boost::lock_guard<mutex_type> lock(console_cache_mtx_);
 
             if (console_cache_ != naming::invalid_locality_id)
             {
@@ -697,7 +699,7 @@ bool addressing_service::get_console_locality(
             boost::uint32_t console = naming::get_locality_id_from_gid(prefix);
 
             {
-                mutex_type::scoped_lock lock(console_cache_mtx_);
+                boost::lock_guard<mutex_type> lock(console_cache_mtx_);
                 if (console_cache_ == naming::invalid_locality_id) {
                     console_cache_ = console;
                 }
@@ -1198,7 +1200,7 @@ bool addressing_service::unbind_range_local(
 
         // I'm afraid that this will break the first form of paged caching,
         // so it's commented out for now.
-        //cache_mutex_type::scoped_lock lock(hosted->gva_cache_mtx_);
+        //boost::lock_guard<cache_mutex_type> lock(hosted->gva_cache_mtx_);
         //gva_erase_policy ep(lower_id, count);
         //hosted->gva_cache_->erase(ep);
 
@@ -1874,7 +1876,7 @@ lcos::future<boost::int64_t> addressing_service::incref_async(
     boost::int64_t pending_decrefs = 0;
 
     {
-        mutex_type::scoped_lock l(refcnt_requests_mtx_);
+        boost::lock_guard<mutex_type> l(refcnt_requests_mtx_);
 
         typedef refcnt_requests_type::iterator iterator;
 
@@ -1977,7 +1979,7 @@ void addressing_service::decref(
 
     try {
         naming::gid_type raw = naming::detail::get_stripped_gid(gid);
-        mutex_type::scoped_lock l(refcnt_requests_mtx_);
+        boost::unique_lock<mutex_type> l(refcnt_requests_mtx_);
 
         // Match the decref request with entries in the incref table
         typedef refcnt_requests_type::iterator iterator;
@@ -2185,7 +2187,7 @@ future<hpx::id_type> addressing_service::on_symbol_namespace_event(
     }
 
     lcos::promise<naming::id_type, naming::gid_type> p;
-    request req(symbol_ns_on_event, name, evt, call_for_past_events, p.get_gid());
+    request req(symbol_ns_on_event, name, evt, call_for_past_events, p.get_id());
     hpx::future<bool> f = stubs::symbol_namespace::service_async<bool>(
         name, req, action_priority_);
 
@@ -2199,8 +2201,11 @@ future<hpx::id_type> addressing_service::on_symbol_namespace_event(
 typedef hpx::agas::server::symbol_namespace::service_action
     symbol_namespace_service_action;
 
-HPX_REGISTER_BROADCAST_ACTION_DECLARATION(symbol_namespace_service_action)
-HPX_REGISTER_BROADCAST_ACTION(symbol_namespace_service_action)
+HPX_REGISTER_BROADCAST_ACTION_DECLARATION(symbol_namespace_service_action,
+        symbol_namespace_service_action)
+HPX_REGISTER_BROADCAST_ACTION_ID(symbol_namespace_service_action,
+        symbol_namespace_service_action,
+        hpx::actions::broadcast_symbol_namespace_service_action_id)
 
 namespace hpx { namespace agas
 {
@@ -2261,7 +2266,7 @@ void addressing_service::insert_cache_entry(
             "addressing_service::insert_cache_entry, gid(%1%), count(%2%)")
             % gid % count);
 
-        cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+        boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
 
         const gva_cache_key key(gid, count);
 
@@ -2334,7 +2339,7 @@ void addressing_service::update_cache_entry(
             "addressing_service::update_cache_entry, gid(%1%), count(%2%)"
             ) % gid % count);
 
-        cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+        boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
 
         const gva_cache_key key(gid, count);
 
@@ -2382,7 +2387,7 @@ void addressing_service::clear_cache(
     try {
         LAGAS_(warning) << "addressing_service::clear_cache, clearing cache";
 
-        cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+        boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
 
         gva_cache_->clear();
 
@@ -2406,7 +2411,7 @@ void addressing_service::remove_cache_entry(
     try {
         LAGAS_(warning) << "addressing_service::remove_cache_entry";
 
-        cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+        boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
 
         gva_cache_->erase(
             [&gid](std::pair<gva_cache_key, gva_entry_type> const& p)
@@ -2429,7 +2434,7 @@ void addressing_service::start_shutdown(error_code& ec)
     if (!caching_)
         return;
 
-    mutex_type::scoped_lock l(refcnt_requests_mtx_);
+    boost::unique_lock<mutex_type> l(refcnt_requests_mtx_);
     enable_refcnt_caching_ = false;
     send_refcnt_requests_sync(l, ec);
 }
@@ -2592,74 +2597,74 @@ bool addressing_service::retrieve_statistics_counter(
 // Helper functions to access the current cache statistics
 boost::uint64_t addressing_service::get_cache_hits(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().hits(reset);
 }
 
 boost::uint64_t addressing_service::get_cache_misses(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().misses(reset);
 }
 
 boost::uint64_t addressing_service::get_cache_evictions(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().evictions(reset);
 }
 
 boost::uint64_t addressing_service::get_cache_insertions(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().insertions(reset);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 boost::uint64_t addressing_service::get_cache_get_entry_count(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().get_get_entry_count(reset);
 }
 
 boost::uint64_t addressing_service::get_cache_insert_entry_count(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().get_insert_entry_count(reset);
 }
 
 boost::uint64_t addressing_service::get_cache_update_entry_count(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().get_update_entry_count(reset);
 }
 
 boost::uint64_t addressing_service::get_cache_erase_entry_count(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().get_erase_entry_count(reset);
 }
 
 boost::uint64_t addressing_service::get_cache_get_entry_time(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().get_get_entry_time(reset);
 }
 
 boost::uint64_t addressing_service::get_cache_insert_entry_time(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().get_insert_entry_time(reset);
 }
 
 boost::uint64_t addressing_service::get_cache_update_entry_time(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().get_update_entry_time(reset);
 }
 
 boost::uint64_t addressing_service::get_cache_erase_entry_time(bool reset)
 {
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return gva_cache_->get_statistics().get_erase_entry_time(reset);
 }
 
@@ -2771,7 +2776,7 @@ void addressing_service::register_counter_types()
                 "function of the AGAS cache",
           HPX_PERFORMANCE_COUNTER_V1,
           boost::bind(&performance_counters::locality_raw_counter_creator,
-              _1, cache_get_entry_count, _2),
+              _1, cache_get_entry_time, _2),
           &performance_counters::locality_counter_discoverer,
           "ns"
         },
@@ -2780,7 +2785,7 @@ void addressing_service::register_counter_types()
               "function of the AGAS cache",
           HPX_PERFORMANCE_COUNTER_V1,
           boost::bind(&performance_counters::locality_raw_counter_creator,
-              _1, cache_insert_entry_count, _2),
+              _1, cache_insert_entry_time, _2),
           &performance_counters::locality_counter_discoverer,
           "ns"
         },
@@ -2789,7 +2794,7 @@ void addressing_service::register_counter_types()
                 "function of the AGAS cache",
           HPX_PERFORMANCE_COUNTER_V1,
           boost::bind(&performance_counters::locality_raw_counter_creator,
-              _1, cache_update_entry_count, _2),
+              _1, cache_update_entry_time, _2),
           &performance_counters::locality_counter_discoverer,
           "ns"
         },
@@ -2798,7 +2803,7 @@ void addressing_service::register_counter_types()
                 "function of the AGAS cache",
           HPX_PERFORMANCE_COUNTER_V1,
           boost::bind(&performance_counters::locality_raw_counter_creator,
-              _1, cache_erase_entry_count, _2),
+              _1, cache_erase_entry_time, _2),
           &performance_counters::locality_counter_discoverer,
           "ns"
         }
@@ -2828,8 +2833,8 @@ void addressing_service::garbage_collect_non_blocking(
     error_code& ec
     )
 {
-    mutex_type::scoped_lock l(refcnt_requests_mtx_, boost::try_to_lock);
-    if (!l) return;     // no need to compete for garbage collection
+    boost::unique_lock<mutex_type> l(refcnt_requests_mtx_, boost::try_to_lock);
+    if (!l.owns_lock()) return;     // no need to compete for garbage collection
 
     send_refcnt_requests_non_blocking(l, ec);
 }
@@ -2838,14 +2843,14 @@ void addressing_service::garbage_collect(
     error_code& ec
     )
 {
-    mutex_type::scoped_lock l(refcnt_requests_mtx_, boost::try_to_lock);
-    if (!l) return;     // no need to compete for garbage collection
+    boost::unique_lock<mutex_type> l(refcnt_requests_mtx_, boost::try_to_lock);
+    if (!l.owns_lock()) return;     // no need to compete for garbage collection
 
     send_refcnt_requests_sync(l, ec);
 }
 
 void addressing_service::send_refcnt_requests(
-    addressing_service::mutex_type::scoped_lock& l
+    boost::unique_lock<addressing_service::mutex_type>& l
   , error_code& ec
     )
 {
@@ -2866,11 +2871,13 @@ void addressing_service::send_refcnt_requests(
 
 #if defined(HPX_HAVE_AGAS_DUMP_REFCNT_ENTRIES)
     void dump_refcnt_requests(
-        addressing_service::mutex_type::scoped_lock& l
+        boost::unique_lock<addressing_service::mutex_type>& l
       , addressing_service::refcnt_requests_type const& requests
       , const char* func_name
         )
     {
+        HPX_ASSERT(l.owns_lock());
+
         std::stringstream ss;
         ss << ( boost::format(
               "%1%, dumping client-side refcnt table, requests(%2%):")
@@ -2894,10 +2901,12 @@ void addressing_service::send_refcnt_requests(
 #endif
 
 void addressing_service::send_refcnt_requests_non_blocking(
-    addressing_service::mutex_type::scoped_lock& l
+    boost::unique_lock<addressing_service::mutex_type>& l
   , error_code& ec
     )
 {
+    HPX_ASSERT(l.owns_lock());
+
     try {
         if (refcnt_requests_->empty())
         {
@@ -2960,9 +2969,11 @@ void addressing_service::send_refcnt_requests_non_blocking(
 
 std::vector<hpx::future<std::vector<response> > >
 addressing_service::send_refcnt_requests_async(
-    addressing_service::mutex_type::scoped_lock& l
+    boost::unique_lock<addressing_service::mutex_type>& l
     )
 {
+    HPX_ASSERT(l.owns_lock());
+
     if (refcnt_requests_->empty())
     {
         l.unlock();
@@ -3019,7 +3030,7 @@ addressing_service::send_refcnt_requests_async(
 }
 
 void addressing_service::send_refcnt_requests_sync(
-    addressing_service::mutex_type::scoped_lock& l
+    boost::unique_lock<addressing_service::mutex_type>& l
   , error_code& ec
     )
 {
@@ -3071,7 +3082,7 @@ addressing_service::begin_migration_async(
 
     // insert the object's new locality into the map of migrated objects
     {
-        cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+        boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
         migrated_objects_table_.insert(gid);
     }
 
@@ -3122,7 +3133,7 @@ bool addressing_service::was_object_migrated(
 #if !defined(HPX_SUPPORT_MULTIPLE_PARCEL_DESTINATIONS)
     HPX_ASSERT(1 == size);
 
-    cache_mutex_type::scoped_lock lock(gva_cache_mtx_);
+    boost::lock_guard<cache_mutex_type> lock(gva_cache_mtx_);
     return was_object_migrated_locked(ids[0].get_gid());
 #else
     // #FIXME: it's not really clear how to handle this situation

@@ -30,8 +30,11 @@
 typedef hpx::components::server::runtime_support::call_startup_functions_action
     call_startup_functions_action;
 
-HPX_REGISTER_BROADCAST_ACTION_DECLARATION(call_startup_functions_action)
-HPX_REGISTER_BROADCAST_ACTION(call_startup_functions_action)
+HPX_REGISTER_BROADCAST_ACTION_DECLARATION(call_startup_functions_action,
+        call_startup_functions_action)
+HPX_REGISTER_BROADCAST_ACTION_ID(call_startup_functions_action,
+        call_startup_functions_action,
+        hpx::actions::broadcast_call_startup_functions_action_id)
 
 #endif
 
@@ -60,7 +63,7 @@ create_barrier(std::size_t num_localities, char const* symname)
     lcos::barrier b = lcos::barrier::create(find_here(), num_localities);
 
     // register an unmanaged gid to avoid id-splitting during startup
-    agas::register_name_sync(symname, b.get_gid().get_gid());
+    agas::register_name_sync(symname, b.get_id().get_gid());
     return b;
 }
 

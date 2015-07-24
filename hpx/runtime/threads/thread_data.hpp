@@ -57,7 +57,7 @@ namespace hpx { namespace threads
                 return get_locked();
             }
 
-            CoroutineImpl* try_get()
+            CoroutineImpl* try_get() //-V524
             {
                 return get_locked();
             }
@@ -559,6 +559,7 @@ namespace hpx { namespace threads
         {
             mutex_type::scoped_lock l(this);
             if (flag && !enabled_interrupt_) {
+                l.unlock();
                 HPX_THROW_EXCEPTION(thread_not_interruptable,
                     "thread_data::interrupt",
                     "interrupts are disabled for this thread");

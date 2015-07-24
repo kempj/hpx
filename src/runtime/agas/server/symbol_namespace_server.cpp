@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <hpx/hpx_fwd.hpp>
+#include <hpx/apply.hpp>
 #include <hpx/runtime/naming/resolver_client.hpp>
 #include <hpx/runtime/actions/continuation.hpp>
 #include <hpx/runtime/agas/interface.hpp>
@@ -15,6 +16,7 @@
 #include <hpx/util/get_and_reset_value.hpp>
 
 #include <boost/make_shared.hpp>
+#include <boost/thread/locks.hpp>
 
 namespace hpx { namespace agas
 {
@@ -248,7 +250,7 @@ void symbol_namespace::register_server_instance(
 
     // register a gid (not the id) to avoid AGAS holding a reference to this
     // component
-    agas::register_name_sync(instance_name_, get_gid().get_gid(), ec);
+    agas::register_name_sync(instance_name_, get_unmanaged_id().get_gid(), ec);
 }
 
 void symbol_namespace::unregister_server_instance(
@@ -295,7 +297,7 @@ response symbol_namespace::bind(
     std::string key = req.get_name();
     naming::gid_type gid = req.get_gid();
 
-    mutex_type::scoped_lock l(mutex_);
+    boost::unique_lock<mutex_type> l(mutex_);
 
     gid_table_type::iterator it = gids_.find(key);
     gid_table_type::iterator end = gids_.end();
@@ -391,7 +393,7 @@ response symbol_namespace::bind(
             boost::shared_ptr<naming::gid_type> current_gid = gid_it->second;
 
             {
-                util::scoped_unlock<mutex_type::scoped_lock> ul(l);
+                util::unlock_guard<boost::unique_lock<mutex_type> > ul(l);
 
                 // split the credit as the receiving end will expect to keep the
                 // object alive
@@ -424,7 +426,7 @@ response symbol_namespace::resolve(
     // parameters
     std::string key = req.get_name();
 
-    mutex_type::scoped_lock l(mutex_);
+    boost::unique_lock<mutex_type> l(mutex_);
 
     gid_table_type::iterator it = gids_.find(key);
     gid_table_type::iterator end = gids_.end();
@@ -467,7 +469,7 @@ response symbol_namespace::unbind(
     // parameters
     std::string key = req.get_name();
 
-    mutex_type::scoped_lock l(mutex_);
+    boost::lock_guard<mutex_type> l(mutex_);
 
     gid_table_type::iterator it = gids_.find(key);
     gid_table_type::iterator end = gids_.end();
@@ -506,7 +508,7 @@ response symbol_namespace::iterate(
 { // {{{ iterate implementation
     iterate_names_function_type f = req.get_iterate_names_function();
 
-    mutex_type::scoped_lock l(mutex_);
+    boost::unique_lock<mutex_type> l(mutex_);
 
     for (gid_table_type::iterator it = gids_.begin(); it != gids_.end(); ++it)
     {
@@ -514,7 +516,7 @@ response symbol_namespace::iterate(
         naming::gid_type gid = *(it->second);
 
         {
-            util::scoped_unlock<mutex_type::scoped_lock> ul(l);
+            util::unlock_guard<boost::unique_lock<mutex_type> > ul(l);
             f(key, gid);
         }
 
@@ -548,7 +550,7 @@ response symbol_namespace::on_event(
         return response(symbol_ns_on_event, no_success);
     }
 
-    mutex_type::scoped_lock l(mutex_);
+    boost::unique_lock<mutex_type> l(mutex_);
 
     bool handled = false;
     if (call_for_past_events)
@@ -562,7 +564,7 @@ response symbol_namespace::on_event(
             // split the credit as the receiving end will expect to keep the
             // object alive
             {
-                util::scoped_unlock<mutex_type::scoped_lock> ul(l);
+                util::unlock_guard<boost::unique_lock<mutex_type> > ul(l);
                 naming::gid_type new_gid = naming::detail::split_gid_if_needed(
                     *current_gid);
 

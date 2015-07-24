@@ -25,11 +25,12 @@
 #include <hpx/components/security/certificate_store.hpp>
 #endif
 
-#include <hpx/config/warnings_prefix.hpp>
-
 #include <boost/smart_ptr/scoped_ptr.hpp>
+#include <boost/thread/locks.hpp>
 
 #include <memory>
+
+#include <hpx/config/warnings_prefix.hpp>
 
 ///////////////////////////////////////////////////////////////////////////////
 namespace hpx
@@ -59,7 +60,7 @@ namespace hpx
     int pre_main(runtime_mode);
 
     ///////////////////////////////////////////////////////////////////////////
-    template <typename SchedulingPolicy, typename NotificationPolicy>
+    template <typename SchedulingPolicy>
     class HPX_EXPORT runtime_impl;
 
 #if defined(HPX_HAVE_SECURITY)
@@ -72,7 +73,7 @@ namespace hpx
     class HPX_EXPORT runtime
     {
     public:
-      
+
         state get_state() const { return state_.load(); }
 
         /// The \a hpx_main_function_type is the default function type usable
@@ -93,7 +94,7 @@ namespace hpx
         /// \brief Manage list of functions to call on exit
         void on_exit(util::function_nonser<void()> const& f)
         {
-            boost::mutex::scoped_lock l(mtx_);
+            boost::lock_guard<boost::mutex> l(mtx_);
             on_exit_functions_.push_back(f);
         }
 
@@ -110,7 +111,7 @@ namespace hpx
 
             typedef util::function_nonser<void()> value_type;
 
-            boost::mutex::scoped_lock l(mtx_);
+            boost::lock_guard<boost::mutex> l(mtx_);
             for (value_type const& f : on_exit_functions_)
                 f();
         }
@@ -424,7 +425,7 @@ namespace hpx {
     bool runtime::verify_parcel_suffix(Buffer const& data,
         naming::gid_type& parcel_id, error_code& ec) const
     {
-        lcos::local::spinlock::scoped_lock l(security_mtx_);
+        boost::lock_guard<lcos::local::spinlock> l(security_mtx_);
         return components::security::verify(*cert_store(ec), data, parcel_id);
     }
 }

@@ -24,13 +24,13 @@ endif()
 # C++ overrides
 ################################################################################
 set(CMAKE_USER_MAKE_RULES_OVERRIDE_CXX
-    "${CMAKE_SOURCE_DIR}/cmake/HPX_CXXOverrides.cmake")
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HPX_CXXOverrides.cmake")
 
 ################################################################################
 # Fortran overrides
 ################################################################################
 set(CMAKE_USER_MAKE_RULES_OVERRIDE_Fortran
-    "${CMAKE_SOURCE_DIR}/cmake/HPX_FortranOverrides.cmake")
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HPX_FortranOverrides.cmake")
 
 ################################################################################
 # Build type (needs to be handled before project command below)
@@ -42,7 +42,7 @@ endif()
 ################################################################################
 # project metadata
 ################################################################################
-project(hpx CXX C)
+project(HPX CXX C)
 
 set(HPX_MAJOR_VERSION 0)
 set(HPX_MINOR_VERSION 9)
@@ -50,6 +50,7 @@ set(HPX_PATCH_LEVEL   11)
 set(HPX_VERSION "${HPX_MAJOR_VERSION}.${HPX_MINOR_VERSION}.${HPX_PATCH_LEVEL}")
 set(HPX_LIBRARY_VERSION "${HPX_VERSION}")
 set(HPX_SOVERSION ${HPX_MAJOR_VERSION})
+set(HPX_PACKAGE_NAME HPX)
 
 if(MSVC)
   set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -58,7 +59,7 @@ endif()
 ################################################################################
 # CMake configuration
 ################################################################################
-set(CMAKE_MODULE_PATH "${hpx_SOURCE_DIR}/cmake")
+set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 # We safe the passed compiler flag to a special variable. This is needed for our
 # build system unit tests. Some flags might influence the created symbols (
@@ -149,6 +150,16 @@ hpx_option(HPX_WITH_DOCUMENTATION BOOL
 hpx_option(HPX_WITH_DOCUMENTATION_SINGLEPAGE BOOL
   "The HPX documentation should be build as a single page HTML (default OFF)."
   OFF CATEGORY "Build Targets")
+
+if(WIN32)
+  hpx_option(HPX_WITH_PSEUDO_DEPENDENCIES BOOL
+    "Force creating pseudo targets and pseudo dependencies (default OFF)."
+    OFF CATEGORY "Build Targets")
+else()
+  hpx_option(HPX_WITH_PSEUDO_DEPENDENCIES BOOL
+    "Force creating pseudo targets and pseudo dependencies (default ON)."
+    ON CATEGORY "Build Targets")
+endif()
 
 ################################################################################
 # Some platforms do not support dynamic linking. Enable this to link all
@@ -516,6 +527,7 @@ hpx_option(HPX_WITH_COMPRESSION_ZLIB BOOL "Enable zlib compression for parcel da
 
 ################################################################################
 # Backwards compatibility options (edit for each release)
+
 # HPX_WITH_COLOCATED_BACKWARDS_COMPATIBILITY: introduced in V0.9.11
 hpx_option(HPX_WITH_COLOCATED_BACKWARDS_COMPATIBILITY BOOL
     "Enable backwards compatibility for apply_colocated, async_colocated and friends"
@@ -524,10 +536,18 @@ if(HPX_WITH_COLOCATED_BACKWARDS_COMPATIBILITY)
   hpx_add_config_define(HPX_HAVE_COLOCATED_BACKWARDS_COMPATIBILITY)
 endif()
 
+# HPX_WITH_COMPONENT_GET_GID_COMPATIBILITY: introduced in V0.9.11
+hpx_option(HPX_WITH_COMPONENT_GET_GID_COMPATIBILITY BOOL
+    "Enable backwards compatibility for component::get_gid() functions"
+    ON ADVANCED)
+if(HPX_WITH_COMPONENT_GET_GID_COMPATIBILITY)
+  hpx_add_config_define(HPX_HAVE_COMPONENT_GET_GID_COMPATIBILITY)
+endif()
+
 ################################################################################
 # Set basic search paths for HPX
 ################################################################################
-include_directories("${hpx_SOURCE_DIR}" "${CMAKE_BINARY_DIR}")
+include_directories("${PROJECT_SOURCE_DIR}" "${CMAKE_BINARY_DIR}")
 link_directories(${CMAKE_BINARY_DIR}/lib)
 
 ################################################################################
@@ -673,6 +693,16 @@ elseif("${HPX_PLATFORM_UC}" STREQUAL "BLUEGENEQ")
   hpx_info("Compiling for BlueGene/Q")
 endif()
 
+if(MSVC14 AND CMAKE_CL_64)
+  hpx_option(HPX_WITH_AWAIT BOOL
+      "Enable the use of experimental __await functionality"
+      OFF ADVANCED CATEGORY "LCOs")
+  if(HPX_WITH_AWAIT)
+    hpx_add_config_define(HPX_HAVE_AWAIT)
+    hpx_add_compile_flag(-await LANGUAGES CXX)
+  endif()
+endif()
+
 ################################################################################
 
 ################################################################################
@@ -782,6 +812,9 @@ hpx_check_for_cxx11_variadic_macros(
 hpx_check_for_cxx11_variadic_templates(
   REQUIRED "HPX needs support for C++11 variadic templates")
 
+hpx_check_for_cxx11_extended_friend_declarations(
+  DEFINITIONS HPX_HAVE_CXX11_EXTENDED_FRIEND_DECLARATIONS)
+
 # Check the availability of certain C++11 library features
 hpx_check_for_cxx11_std_chrono(
   DEFINITIONS HPX_HAVE_CXX11_STD_CHRONO)
@@ -848,8 +881,13 @@ if(MSVC)
   enable_language(ASM_MASM)
   hpx_add_compile_flag(-Ox
     CONFIGURATIONS Release LANGUAGES CXX C)
-  hpx_add_compile_flag(-RTC1
-    CONFIGURATIONS Debug LANGUAGES CXX C)
+
+  if(NOT HPX_WITH_AWAIT)
+    hpx_add_compile_flag(/RTC1 CONFIGURATIONS Debug LANGUAGES CXX C)
+  else()
+    # /RTC1 is incompatible with /await
+    hpx_remove_compile_flag(/RTC1 CONFIGURATIONS Debug LANGUAGES CXX C)
+  endif()
 
   # VS2012 and above has a special flag for improving the debug experience by
   # adding more symbol information to the build (-d2Zi)
@@ -859,7 +897,7 @@ if(MSVC)
   # VS2013 and above know how to do link time constant data segment folding
   # VS2013 update 2 and above know how to remove debug information for
   #     non-referenced functions and data (-Zc:inline)
-  if(MSVC12 OR MSVC13)
+  if(MSVC12 OR MSVC14)
     hpx_add_compile_flag(-Zc:inline)
     hpx_add_compile_flag(-Gw
       CONFIGURATIONS Release RelWithDebInfo MinSizeRelease)
@@ -1240,18 +1278,18 @@ endforeach()
 
 # Generate a defines.hpp to be used in the build directory ...
 set(HPX_DEFINES_PREFIX ${HPX_BUILD_PREFIX})
-configure_file("${hpx_SOURCE_DIR}/cmake/templates/config_defines.hpp.in"
+configure_file("${PROJECT_SOURCE_DIR}/cmake/templates/config_defines.hpp.in"
                "${CMAKE_BINARY_DIR}/hpx/config/defines.hpp"
                @ONLY)
 
 # Generate a defines.hpp to be used in the install directory ...
 set(HPX_DEFINES_PREFIX ${HPX_PREFIX})
-configure_file("${hpx_SOURCE_DIR}/cmake/templates/config_defines.hpp.in"
+configure_file("${PROJECT_SOURCE_DIR}/cmake/templates/config_defines.hpp.in"
                "${CMAKE_BINARY_DIR}/${CMAKE_FILES_DIRECTORY}/hpx/config/defines.hpp"
                @ONLY)
 
 # Configure hpxrun.py
-configure_file("${hpx_SOURCE_DIR}/cmake/templates/hpxrun.py.in"
+configure_file("${PROJECT_SOURCE_DIR}/cmake/templates/hpxrun.py.in"
                "${CMAKE_BINARY_DIR}/bin/hpxrun.py"
                @ONLY)
 
@@ -1321,7 +1359,7 @@ install( # install all hpx tests source files
 
 install( # Install all HPX cmake utility files
   DIRECTORY cmake/
-  DESTINATION ${LIB}/cmake/hpx
+  DESTINATION ${LIB}/cmake/${HPX_PACKAGE_NAME}
   COMPONENT core
   PATTERN ".cmake.in" EXCLUDE
   PATTERN ".git" EXCLUDE)
@@ -1337,7 +1375,7 @@ install( # Install HPX Python scripts
   PATTERN ".git" EXCLUDE)
 
 #   if(UNIX)
-#     file(GLOB scripts "${CMAKE_SOURCE_DIR}/python/scripts/*.py")
+#     file(GLOB scripts "${PROJECT_SOURCE_DIR}/python/scripts/*.py")
 #     execute_process(COMMAND "${CMAKE_COMMAND}" -E make_directory
 #       "${CMAKE_BINARY_DIR}/python/scripts" )
 #     foreach(script ${scripts})
@@ -1366,7 +1404,7 @@ install( # Install HPX Python scripts
 #
 #   execute_process(COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/python" )
 #   #make symlink, so that we have intact hpx symlink in CMAKE_BINARY_DIR
-#   execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink "${CMAKE_SOURCE_DIR}/python/hpx"
+#   execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink "${PROJECT_SOURCE_DIR}/python/hpx"
 #     "hpx-${HPX_VERSION}" WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/python")
 #   # create a symlink in share pointing to the latest HPX installation
 #   execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink "hpx-${HPX_VERSION}" "hpx" WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/python")
@@ -1419,7 +1457,7 @@ if(Boost_VERSION LESS 105300)
 endif()
 
 install(
-  FILES "${hpx_SOURCE_DIR}/LICENSE_1_0.txt"
+  FILES "${PROJECT_SOURCE_DIR}/LICENSE_1_0.txt"
   DESTINATION share/hpx-${HPX_VERSION}
   COMPONENT license)
 
@@ -1438,19 +1476,19 @@ if(HPX_WITH_DOCUMENTATION)
     PATTERN "*images*" EXCLUDE)
 
   install(
-    FILES "${hpx_SOURCE_DIR}/docs/index.html"
+    FILES "${PROJECT_SOURCE_DIR}/docs/index.html"
     DESTINATION share/hpx-${HPX_VERSION}/
     COMPONENT docs)
 
   install(
-    DIRECTORY "${hpx_SOURCE_DIR}/docs/html/src/"
+    DIRECTORY "${PROJECT_SOURCE_DIR}/docs/html/src/"
     DESTINATION share/hpx-${HPX_VERSION}/docs/html/src
     COMPONENT docs
     FILES_MATCHING PATTERN "*.css"
     PATTERN ".git" EXCLUDE)
 
   install(
-    DIRECTORY "${hpx_SOURCE_DIR}/docs/html/images/"
+    DIRECTORY "${PROJECT_SOURCE_DIR}/docs/html/images/"
     DESTINATION share/hpx-${HPX_VERSION}/docs/html/images
     COMPONENT docs
     FILES_MATCHING PATTERN "*.png"

@@ -29,11 +29,14 @@ namespace boost
         {
             register_signature(".c");
             register_signature(".cpp");
+            register_signature(".css");
             register_signature(".cxx");
             register_signature(".h");
             register_signature(".hpp");
             register_signature(".hxx");
+            register_signature(".inc");
             register_signature(".ipp");
+            register_signature(".txt");
         }
 
         void whitespace_check::inspect(
@@ -50,7 +53,7 @@ namespace boost
             vector<string> someline, lineorder;
 
 
-            char_separator<char> sep("\n");
+            char_separator<char> sep("\n", "", boost::keep_empty_tokens);
             tokenizer<char_separator<char>> tokens(contents, sep);
             for (const auto& t : tokens) {
                 size_t rend = t.find_first_of("\r"), size = t.size();
@@ -60,7 +63,7 @@ namespace boost
                 }
                 else
                 {
-                    char_separator<char> sep2("\r");
+                    char_separator<char> sep2("\r", "", boost::keep_empty_tokens);
                     tokenizer<char_separator<char>> tokens2(t, sep2);
                     for (const auto& u : tokens2) {
                         someline.push_back(u);
@@ -81,7 +84,7 @@ namespace boost
                     extend = 1;
                 }
                 size_t size = someline[p].size();
-                if (found < size - extend)
+                if (found < size - extend || (found == someline[p].npos && size > 1))
                 {
                     errors++;
                     linenum = to_string(currline);
